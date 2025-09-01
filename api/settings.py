@@ -181,17 +181,17 @@ SIMPLE_JWT = {
     'SLIDING_TOKEN_REFRESH_LIFETIME': timedelta(days=36500),
 }
 
-# Configuración de CORS
-# CORS_ALLOW_ALL_ORIGINS = True  # Solo para desarrollo inicial
+# Configuración de CORS (modo permisivo para pruebas)
+CORS_ALLOW_ALL_ORIGINS = True
 
-# URLs permitidas para hacer peticiones al backend
-CORS_ALLOWED_ORIGINS = [
-    "http://localhost:3000",  # React en desarrollo local
-    "http://127.0.0.1:3000",  # React en desarrollo local (alternativo)
-    "https://monitoria-front-jaime.vercel.app",  # Frontend en producción Vercel
-    "http://localhost:8080",  # Vue/Nuxt en desarrollo (si usas)
-    "http://127.0.0.1:8080",  # Vue/Nuxt en desarrollo (alternativo)
-]
+# Si deseas restringir en producción, comenta la línea anterior y usa esta lista:
+# CORS_ALLOWED_ORIGINS = [
+#     "http://localhost:3000",
+#     "http://127.0.0.1:3000",
+#     "https://monitoria-front-jaime.vercel.app",
+#     "http://localhost:8080",
+#     "http://127.0.0.1:8080",
+# ]
 
 CORS_ALLOW_CREDENTIALS = True
 
