@@ -182,14 +182,16 @@ SIMPLE_JWT = {
 }
 
 # Configuración de CORS
-CORS_ALLOW_ALL_ORIGINS = True  # Para desarrollo, permite todas las URLs
+# CORS_ALLOW_ALL_ORIGINS = True  # Solo para desarrollo inicial
 
-# En producción, usa esto en su lugar:
-# CORS_ALLOWED_ORIGINS = [
-#     "http://localhost:3000",  # React en desarrollo
-#     "http://127.0.0.1:3000",
-#     "https://tu-frontend.vercel.app",  # Tu frontend en producción
-# ]
+# URLs permitidas para hacer peticiones al backend
+CORS_ALLOWED_ORIGINS = [
+    "http://localhost:3000",  # React en desarrollo local
+    "http://127.0.0.1:3000",  # React en desarrollo local (alternativo)
+    "https://monitoria-front-jaime.vercel.app",  # Frontend en producción Vercel
+    "http://localhost:8080",  # Vue/Nuxt en desarrollo (si usas)
+    "http://127.0.0.1:8080",  # Vue/Nuxt en desarrollo (alternativo)
+]
 
 CORS_ALLOW_CREDENTIALS = True
 
