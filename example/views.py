@@ -605,6 +605,16 @@ def monitor_marcar(request):
         defaults={'presente': False, 'estado_autorizacion': 'pendiente'}
     )
 
+    # Solo permite marcar si el bloque fue autorizado por un DIRECTIVO
+    if asistencia.estado_autorizacion != 'autorizado':
+        return Response(
+            {
+                'detail': 'Este bloque aún no ha sido autorizado por un directivo.',
+                'code': 'not_authorized'
+            },
+            status=status.HTTP_403_FORBIDDEN
+        )
+
     asistencia.presente = True
     asistencia.save()
 
