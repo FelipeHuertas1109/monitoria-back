@@ -13,6 +13,7 @@ https://docs.djangoproject.com/en/4.1/ref/settings/
 from pathlib import Path
 import os
 from decouple import config
+import dj_database_url
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -27,7 +28,7 @@ SECRET_KEY = config('SECRET_KEY', default='django-insecure-=cldztbc4jg&xl0!x673!
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = config('DEBUG', default=True, cast=bool)
 
-ALLOWED_HOSTS = ['127.0.0.1', '.vercel.app']
+ALLOWED_HOSTS = ['127.0.0.1', '.vercel.app', 'monitoria-back.vercel.app']
 
 
 # Application definition
@@ -77,9 +78,11 @@ TEMPLATES = [
 WSGI_APPLICATION = 'api.wsgi.app'
 
 
-# Database
-# https://docs.djangoproject.com/en/4.1/ref/settings/#databases
-
+"""
+Base de datos:
+- Soporta variables clásicas (DB_HOST, DB_NAME, DB_USER, DB_PASSWORD, DB_PORT)
+- Si DATABASE_URL está definida, se usa con SSL requerido (?sslmode=require)
+"""
 DATABASES = {
     'default': {
         'ENGINE': 'django.db.backends.postgresql',
@@ -90,6 +93,11 @@ DATABASES = {
         'PORT': config('DB_PORT', default='5432'),
     }
 }
+
+DATABASE_URL = config('DATABASE_URL', default=None)
+if DATABASE_URL:
+    # En producción (Vercel), exige SSL
+    DATABASES['default'] = dj_database_url.parse(DATABASE_URL, conn_max_age=600, ssl_require=True)
 
 
 # Password validation
@@ -114,9 +122,9 @@ AUTH_PASSWORD_VALIDATORS = [
 # Internationalization
 # https://docs.djangoproject.com/en/4.1/topics/i18n/
 
-LANGUAGE_CODE = 'en-us'
+LANGUAGE_CODE = 'es-co'
 
-TIME_ZONE = 'UTC'
+TIME_ZONE = 'America/Bogota'
 
 USE_I18N = True
 
@@ -214,4 +222,9 @@ CORS_ALLOW_METHODS = [
     'PATCH',
     'POST',
     'PUT',
+]
+
+# Seguridad producción
+CSRF_TRUSTED_ORIGINS = [
+    'https://monitoria-back.vercel.app',
 ]
