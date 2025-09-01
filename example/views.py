@@ -3,6 +3,8 @@ from rest_framework.decorators import api_view, permission_classes, authenticati
 from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.response import Response
 from rest_framework_simplejwt.tokens import RefreshToken, AccessToken
+from rest_framework_simplejwt.authentication import JWTAuthentication
+from rest_framework.authentication import BaseAuthentication
 import jwt
 from django.conf import settings
 from rest_framework_simplejwt.exceptions import InvalidToken, TokenError
@@ -15,6 +17,47 @@ from .serializers import (
     HorarioFijoSerializer, HorarioFijoCreateSerializer, HorarioFijoMultipleSerializer, HorarioFijoEditMultipleSerializer,
     AsistenciaSerializer, AsistenciaCreateSerializer
 )
+
+# Autenticación personalizada para JWT con nuestro modelo
+class UsuarioPersonalizadoJWTAuthentication(BaseAuthentication):
+    def authenticate(self, request):
+        auth_header = request.META.get('HTTP_AUTHORIZATION')
+        print(f"🔍 AUTH DEBUG - Header: {auth_header}")
+        
+        if not auth_header or not auth_header.startswith('Bearer '):
+            print("❌ AUTH DEBUG - No Bearer token found")
+            return None
+        
+        token = auth_header.split(' ')[1]
+        print(f"🔍 AUTH DEBUG - Token: {token[:50]}...")
+        
+        try:
+            # Decodificar token JWT
+            payload = jwt.decode(token, settings.SECRET_KEY, algorithms=['HS256'])
+            print(f"🔍 AUTH DEBUG - Payload: {payload}")
+            
+            user_id = payload.get('user_id')
+            print(f"🔍 AUTH DEBUG - User ID: {user_id}")
+            
+            if not user_id:
+                print("❌ AUTH DEBUG - No user_id in payload")
+                return None
+            
+            # Buscar usuario personalizado
+            usuario = UsuarioPersonalizado.objects.get(pk=user_id)
+            print(f"✅ AUTH DEBUG - Usuario encontrado: {usuario.username} (ID: {usuario.id})")
+            
+            return (usuario, token)
+            
+        except jwt.InvalidTokenError as e:
+            print(f"❌ AUTH DEBUG - JWT Error: {e}")
+            return None
+        except UsuarioPersonalizado.DoesNotExist as e:
+            print(f"❌ AUTH DEBUG - Usuario no existe: {e}")
+            return None
+        except Exception as e:
+            print(f"❌ AUTH DEBUG - Error general: {e}")
+            return None
 
 @api_view(['POST'])
 @permission_classes([AllowAny])
@@ -539,19 +582,17 @@ def directivo_rechazar_asistencia(request, pk):
 # ===== Endpoints para MONITORES =====
 
 @api_view(['GET'])
-@authentication_classes([])
-@permission_classes([AllowAny])
+@authentication_classes([UsuarioPersonalizadoJWTAuthentication])
+@permission_classes([IsAuthenticated])
 def monitor_mis_asistencias(request):
     """
     Lista (y genera si faltan) las asistencias del usuario MONITOR para la fecha (por defecto hoy)
     """
-    auth_header = request.headers.get('Authorization')
-    if not auth_header or not auth_header.startswith('Bearer '):
-        return Response({'detail': 'Token de autenticación requerido'}, status=status.HTTP_401_UNAUTHORIZED)
-
-    usuario = UsuarioPersonalizado.objects.filter(tipo_usuario='MONITOR').first()
-    if not usuario:
-        return Response({'detail': 'No hay usuarios MONITOR'}, status=status.HTTP_404_NOT_FOUND)
+    usuario = request.user
+    print(f"=== MONITOR MIS ASISTENCIAS - Usuario autenticado: {usuario.username} (ID: {usuario.id}) ===")
+    
+    if usuario.tipo_usuario != 'MONITOR':
+        return Response({'detail': 'Solo monitores pueden acceder a este endpoint'}, status=status.HTTP_403_FORBIDDEN)
 
     fecha_obj = _parse_fecha(request.query_params.get('fecha'))
     dia_semana = _dia_semana_de_fecha(fecha_obj)
@@ -572,20 +613,18 @@ def monitor_mis_asistencias(request):
     return Response(serializer.data)
 
 @api_view(['POST'])
-@authentication_classes([])
-@permission_classes([AllowAny])
+@authentication_classes([UsuarioPersonalizadoJWTAuthentication])
+@permission_classes([IsAuthenticated])
 def monitor_marcar(request):
     """
     Body: { "fecha": "YYYY-MM-DD", "jornada": "M|T" }
     Marca presente=True en la asistencia del bloque correspondiente si el usuario tiene HorarioFijo.
     """
-    auth_header = request.headers.get('Authorization')
-    if not auth_header or not auth_header.startswith('Bearer '):
-        return Response({'detail': 'Token de autenticación requerido'}, status=status.HTTP_401_UNAUTHORIZED)
-
-    usuario = UsuarioPersonalizado.objects.filter(tipo_usuario='MONITOR').first()
-    if not usuario:
-        return Response({'detail': 'No hay usuarios MONITOR'}, status=status.HTTP_404_NOT_FOUND)
+    usuario = request.user
+    print(f"=== MONITOR MARCAR - Usuario autenticado: {usuario.username} (ID: {usuario.id}) ===")
+    
+    if usuario.tipo_usuario != 'MONITOR':
+        return Response({'detail': 'Solo monitores pueden marcar asistencia'}, status=status.HTTP_403_FORBIDDEN)
 
     fecha_obj = _parse_fecha(request.data.get('fecha'))
     jornada = request.data.get('jornada')
