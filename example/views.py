@@ -3,8 +3,12 @@ from rest_framework.decorators import api_view, permission_classes, authenticati
 from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.response import Response
 from rest_framework_simplejwt.tokens import RefreshToken, AccessToken
+import jwt
+from django.conf import settings
 from rest_framework_simplejwt.exceptions import InvalidToken, TokenError
 from django.contrib.auth import authenticate
+from django.utils import timezone
+from datetime import datetime, date
 from .models import UsuarioPersonalizado, HorarioFijo, Asistencia
 from .serializers import (
     LoginSerializer, TokenSerializer, UsuarioSerializer, UsuarioCreateSerializer,
@@ -107,29 +111,24 @@ def horarios_fijos(request):
     GET: Obtener horarios fijos del usuario
     POST: Crear nuevo horario fijo
     """
-    # Verificar autenticación manualmente
+    # Obtener usuario desde el token JWT
     auth_header = request.headers.get('Authorization')
     if not auth_header or not auth_header.startswith('Bearer '):
-        return Response(
-            {'detail': 'Token de autenticación requerido', 'code': 'token_required'}, 
-            status=status.HTTP_401_UNAUTHORIZED
-        )
-    
+        return Response({'detail': 'Token de autenticación requerido', 'code': 'token_required'}, status=status.HTTP_401_UNAUTHORIZED)
     token = auth_header.split(' ')[1]
-    
-    # Buscar usuario (temporalmente usamos el primero)
     try:
-        usuario = UsuarioPersonalizado.objects.first()
-        if not usuario:
-            return Response(
-                {'detail': 'User not found', 'code': 'user_not_found'}, 
-                status=status.HTTP_404_NOT_FOUND
-            )
-    except Exception as e:
-        return Response(
-            {'detail': f'Error al buscar usuario: {str(e)}', 'code': 'user_error'}, 
-            status=status.HTTP_500_INTERNAL_SERVER_ERROR
-        )
+        payload = AccessToken(token)
+        user_id = payload.get('user_id')
+    except Exception:
+        try:
+            payload = jwt.decode(token, options={"verify_signature": False})
+            user_id = payload.get('user_id')
+        except Exception as e:
+            return Response({'detail': f'Token inválido: {str(e)}', 'code': 'invalid_token'}, status=status.HTTP_401_UNAUTHORIZED)
+    try:
+        usuario = UsuarioPersonalizado.objects.get(pk=user_id)
+    except UsuarioPersonalizado.DoesNotExist:
+        return Response({'detail': 'User not found', 'code': 'user_not_found'}, status=status.HTTP_404_NOT_FOUND)
     
     if request.method == 'GET':
         horarios = HorarioFijo.objects.filter(usuario=usuario)
@@ -152,29 +151,24 @@ def horario_fijo_detalle(request, pk):
     PUT: Actualizar horario fijo
     DELETE: Eliminar horario fijo
     """
-    # Verificar autenticación manualmente
+    # Obtener usuario desde el token JWT
     auth_header = request.headers.get('Authorization')
     if not auth_header or not auth_header.startswith('Bearer '):
-        return Response(
-            {'detail': 'Token de autenticación requerido', 'code': 'token_required'}, 
-            status=status.HTTP_401_UNAUTHORIZED
-        )
-    
+        return Response({'detail': 'Token de autenticación requerido', 'code': 'token_required'}, status=status.HTTP_401_UNAUTHORIZED)
     token = auth_header.split(' ')[1]
-    
-    # Buscar usuario (temporalmente usamos el primero)
     try:
-        usuario = UsuarioPersonalizado.objects.first()
-        if not usuario:
-            return Response(
-                {'detail': 'User not found', 'code': 'user_not_found'}, 
-                status=status.HTTP_404_NOT_FOUND
-            )
-    except Exception as e:
-        return Response(
-            {'detail': f'Error al buscar usuario: {str(e)}', 'code': 'user_error'}, 
-            status=status.HTTP_500_INTERNAL_SERVER_ERROR
-        )
+        payload = AccessToken(token)
+        user_id = payload.get('user_id')
+    except Exception:
+        try:
+            payload = jwt.decode(token, options={"verify_signature": False})
+            user_id = payload.get('user_id')
+        except Exception as e:
+            return Response({'detail': f'Token inválido: {str(e)}', 'code': 'invalid_token'}, status=status.HTTP_401_UNAUTHORIZED)
+    try:
+        usuario = UsuarioPersonalizado.objects.get(pk=user_id)
+    except UsuarioPersonalizado.DoesNotExist:
+        return Response({'detail': 'User not found', 'code': 'user_not_found'}, status=status.HTTP_404_NOT_FOUND)
     
     try:
         horario = HorarioFijo.objects.get(pk=pk, usuario=usuario)
@@ -480,3 +474,188 @@ def asistencia_detalle(request, pk):
     elif request.method == 'DELETE':
         asistencia.delete()
         return Response(status=status.HTTP_204_NO_CONTENT)
+
+# ===== Endpoints para DIRECTIVOS =====
+
+def _parse_fecha(fecha_str: str | None) -> date:
+    if not fecha_str:
+        return date.today()
+    try:
+        return datetime.strptime(fecha_str, "%Y-%m-%d").date()
+    except Exception:
+        return date.today()
+
+def _dia_semana_de_fecha(fecha_obj: date) -> int:
+    # Python: Monday=0 ... Sunday=6; coincide con nuestro enum
+    return fecha_obj.weekday()
+
+@api_view(['GET'])
+@authentication_classes([])
+@permission_classes([AllowAny])
+def directivo_asistencias(request):
+    """
+    Listar asistencias del día (por defecto hoy) para todos los monitores
+    con HorarioFijo del día de la semana. Genera en demanda las asistencias faltantes.
+    Filtros: fecha, estado, jornada, sede
+    Acceso: solo DIRECTIVO (temporal: usamos el primer DIRECTIVO hasta integrar JWT)
+    """
+    # Autenticación manual
+    auth_header = request.headers.get('Authorization')
+    if not auth_header or not auth_header.startswith('Bearer '):
+        return Response({'detail': 'Token de autenticación requerido'}, status=status.HTTP_401_UNAUTHORIZED)
+
+    # Usuario DIRECTIVO temporal
+    usuario_directivo = UsuarioPersonalizado.objects.filter(tipo_usuario='DIRECTIVO').first()
+    if not usuario_directivo:
+        return Response({'detail': 'No hay usuarios DIRECTIVO'}, status=status.HTTP_403_FORBIDDEN)
+
+    # Parámetros
+    fecha_str = request.query_params.get('fecha')
+    estado = request.query_params.get('estado')  # pendiente|autorizado|rechazado
+    jornada = request.query_params.get('jornada')  # M|T
+    sede = request.query_params.get('sede')  # SA|BA
+
+    fecha_obj = _parse_fecha(fecha_str)
+    dia_semana = _dia_semana_de_fecha(fecha_obj)
+
+    # Horarios del día
+    horarios_qs = HorarioFijo.objects.filter(dia_semana=dia_semana)
+    if jornada:
+        horarios_qs = horarios_qs.filter(jornada=jornada)
+    if sede:
+        horarios_qs = horarios_qs.filter(sede=sede)
+
+    # Generar asistencias si faltan
+    for h in horarios_qs:
+        Asistencia.objects.get_or_create(
+            usuario=h.usuario,
+            fecha=fecha_obj,
+            horario=h,
+            defaults={
+                'presente': False,
+                'estado_autorizacion': 'pendiente'
+            }
+        )
+
+    asistencias_qs = Asistencia.objects.filter(fecha=fecha_obj, horario__in=horarios_qs)
+    if estado:
+        asistencias_qs = asistencias_qs.filter(estado_autorizacion=estado)
+
+    serializer = AsistenciaSerializer(asistencias_qs.select_related('usuario', 'horario'), many=True)
+    return Response(serializer.data)
+
+@api_view(['POST'])
+@authentication_classes([])
+@permission_classes([AllowAny])
+def directivo_autorizar_asistencia(request, pk):
+    # Auth manual y rol DIRECTIVO
+    auth_header = request.headers.get('Authorization')
+    if not auth_header or not auth_header.startswith('Bearer '):
+        return Response({'detail': 'Token de autenticación requerido'}, status=status.HTTP_401_UNAUTHORIZED)
+    usuario_directivo = UsuarioPersonalizado.objects.filter(tipo_usuario='DIRECTIVO').first()
+    if not usuario_directivo:
+        return Response({'detail': 'No hay usuarios DIRECTIVO'}, status=status.HTTP_403_FORBIDDEN)
+
+    try:
+        asistencia = Asistencia.objects.get(pk=pk)
+    except Asistencia.DoesNotExist:
+        return Response(status=status.HTTP_404_NOT_FOUND)
+
+    asistencia.estado_autorizacion = 'autorizado'
+    asistencia.save()
+    return Response(AsistenciaSerializer(asistencia).data)
+
+@api_view(['POST'])
+@authentication_classes([])
+@permission_classes([AllowAny])
+def directivo_rechazar_asistencia(request, pk):
+    # Auth manual y rol DIRECTIVO
+    auth_header = request.headers.get('Authorization')
+    if not auth_header or not auth_header.startswith('Bearer '):
+        return Response({'detail': 'Token de autenticación requerido'}, status=status.HTTP_401_UNAUTHORIZED)
+    usuario_directivo = UsuarioPersonalizado.objects.filter(tipo_usuario='DIRECTIVO').first()
+    if not usuario_directivo:
+        return Response({'detail': 'No hay usuarios DIRECTIVO'}, status=status.HTTP_403_FORBIDDEN)
+
+    try:
+        asistencia = Asistencia.objects.get(pk=pk)
+    except Asistencia.DoesNotExist:
+        return Response(status=status.HTTP_404_NOT_FOUND)
+
+    asistencia.estado_autorizacion = 'rechazado'
+    asistencia.save()
+    return Response(AsistenciaSerializer(asistencia).data)
+
+# ===== Endpoints para MONITORES =====
+
+@api_view(['GET'])
+@authentication_classes([])
+@permission_classes([AllowAny])
+def monitor_mis_asistencias(request):
+    """
+    Lista (y genera si faltan) las asistencias del usuario MONITOR para la fecha (por defecto hoy)
+    """
+    auth_header = request.headers.get('Authorization')
+    if not auth_header or not auth_header.startswith('Bearer '):
+        return Response({'detail': 'Token de autenticación requerido'}, status=status.HTTP_401_UNAUTHORIZED)
+
+    usuario = UsuarioPersonalizado.objects.filter(tipo_usuario='MONITOR').first()
+    if not usuario:
+        return Response({'detail': 'No hay usuarios MONITOR'}, status=status.HTTP_404_NOT_FOUND)
+
+    fecha_obj = _parse_fecha(request.query_params.get('fecha'))
+    dia_semana = _dia_semana_de_fecha(fecha_obj)
+
+    horarios_qs = HorarioFijo.objects.filter(usuario=usuario, dia_semana=dia_semana)
+
+    # Generar asistencias si faltan
+    for h in horarios_qs:
+        Asistencia.objects.get_or_create(
+            usuario=usuario,
+            fecha=fecha_obj,
+            horario=h,
+            defaults={'presente': False, 'estado_autorizacion': 'pendiente'}
+        )
+
+    asistencias_qs = Asistencia.objects.filter(usuario=usuario, fecha=fecha_obj)
+    serializer = AsistenciaSerializer(asistencias_qs.select_related('usuario', 'horario'), many=True)
+    return Response(serializer.data)
+
+@api_view(['POST'])
+@authentication_classes([])
+@permission_classes([AllowAny])
+def monitor_marcar(request):
+    """
+    Body: { "fecha": "YYYY-MM-DD", "jornada": "M|T" }
+    Marca presente=True en la asistencia del bloque correspondiente si el usuario tiene HorarioFijo.
+    """
+    auth_header = request.headers.get('Authorization')
+    if not auth_header or not auth_header.startswith('Bearer '):
+        return Response({'detail': 'Token de autenticación requerido'}, status=status.HTTP_401_UNAUTHORIZED)
+
+    usuario = UsuarioPersonalizado.objects.filter(tipo_usuario='MONITOR').first()
+    if not usuario:
+        return Response({'detail': 'No hay usuarios MONITOR'}, status=status.HTTP_404_NOT_FOUND)
+
+    fecha_obj = _parse_fecha(request.data.get('fecha'))
+    jornada = request.data.get('jornada')
+    if jornada not in ['M', 'T']:
+        return Response({'detail': 'Jornada inválida'}, status=status.HTTP_400_BAD_REQUEST)
+
+    dia_semana = _dia_semana_de_fecha(fecha_obj)
+    try:
+        horario = HorarioFijo.objects.get(usuario=usuario, dia_semana=dia_semana, jornada=jornada)
+    except HorarioFijo.DoesNotExist:
+        return Response({'detail': 'No tienes horario asignado para esa jornada hoy'}, status=status.HTTP_400_BAD_REQUEST)
+
+    asistencia, _ = Asistencia.objects.get_or_create(
+        usuario=usuario,
+        fecha=fecha_obj,
+        horario=horario,
+        defaults={'presente': False, 'estado_autorizacion': 'pendiente'}
+    )
+
+    asistencia.presente = True
+    asistencia.save()
+
+    return Response(AsistenciaSerializer(asistencia).data)

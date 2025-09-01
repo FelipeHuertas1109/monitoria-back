@@ -94,14 +94,20 @@ class Asistencia(models.Model):
     """
     Asistencia semanal basada en el HorarioFijo.
     """
+    ESTADOS_AUTORIZACION = [
+        ("pendiente", "Pendiente"),
+        ("autorizado", "Autorizado"),
+        ("rechazado", "Rechazado"),
+    ]
     usuario = models.ForeignKey(UsuarioPersonalizado, on_delete=models.CASCADE, related_name="asistencias")
     fecha = models.DateField()  # Día específico
     horario = models.ForeignKey(HorarioFijo, on_delete=models.CASCADE, related_name="asistencias")
     presente = models.BooleanField(default=False)
+    estado_autorizacion = models.CharField(max_length=10, choices=ESTADOS_AUTORIZACION, default="pendiente")
 
     class Meta:
         unique_together = ("usuario", "fecha", "horario")
 
     def __str__(self):
         estado = "Presente" if self.presente else "Pendiente"
-        return f"{self.usuario} - {self.fecha} - {self.horario} [{estado}]"
+        return f"{self.usuario} - {self.fecha} - {self.horario} [{estado} | {self.estado_autorizacion}]"

@@ -16,4 +16,13 @@ urlpatterns = [
     # Asistencias
     path('asistencias/', views.asistencias, name='asistencias'),
     path('asistencias/<int:pk>/', views.asistencia_detalle, name='asistencia_detalle'),
+
+    # Directivo
+    path('directivo/asistencias/', views.directivo_asistencias, name='directivo_asistencias'),
+    path('directivo/asistencias/<int:pk>/autorizar/', views.directivo_autorizar_asistencia, name='directivo_autorizar_asistencia'),
+    path('directivo/asistencias/<int:pk>/rechazar/', views.directivo_rechazar_asistencia, name='directivo_rechazar_asistencia'),
+
+    # Monitor
+    path('monitor/mis-asistencias/', views.monitor_mis_asistencias, name='monitor_mis_asistencias'),
+    path('monitor/marcar/', views.monitor_marcar, name='monitor_marcar'),
 ]
