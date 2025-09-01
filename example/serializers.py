@@ -163,16 +163,11 @@ class AsistenciaSerializer(serializers.ModelSerializer):
     usuario = UsuarioSerializer(read_only=True)
     horario = HorarioFijoSerializer(read_only=True)
     estado_autorizacion_display = serializers.CharField(source='get_estado_autorizacion_display', read_only=True)
-    horas = serializers.SerializerMethodField()
     
     class Meta:
         model = Asistencia
         fields = ['id', 'usuario', 'fecha', 'horario', 'presente', 'estado_autorizacion', 'estado_autorizacion_display', 'horas']
-        read_only_fields = ['id', 'horas']
-    
-    def get_horas(self, obj):
-        # 4 horas solo si presente=True y estado_autorizacion=autorizado
-        return 4 if obj.presente and obj.estado_autorizacion == 'autorizado' else 0
+        read_only_fields = ['id']
 
 class AsistenciaCreateSerializer(serializers.ModelSerializer):
     class Meta:

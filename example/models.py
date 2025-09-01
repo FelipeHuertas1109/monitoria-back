@@ -104,6 +104,7 @@ class Asistencia(models.Model):
     horario = models.ForeignKey(HorarioFijo, on_delete=models.CASCADE, related_name="asistencias")
     presente = models.BooleanField(default=False)
     estado_autorizacion = models.CharField(max_length=10, choices=ESTADOS_AUTORIZACION, default="pendiente")
+    horas = models.DecimalField(max_digits=4, decimal_places=2, default=0.00, help_text="Horas trabajadas en esta jornada")
 
     class Meta:
         unique_together = ("usuario", "fecha", "horario")

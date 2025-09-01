@@ -12,6 +12,18 @@ from django.contrib.auth import authenticate
 from django.utils import timezone
 from datetime import datetime, date
 from .models import UsuarioPersonalizado, HorarioFijo, Asistencia
+
+def calcular_horas_asistencia(asistencia):
+    """
+    Calcula y actualiza las horas de una asistencia basado en:
+    - presente=True AND estado_autorizacion='autorizado' = 4 horas
+    - Cualquier otro caso = 0 horas
+    """
+    if asistencia.presente and asistencia.estado_autorizacion == 'autorizado':
+        asistencia.horas = 4.00
+    else:
+        asistencia.horas = 0.00
+    return asistencia
 from .serializers import (
     LoginSerializer, TokenSerializer, UsuarioSerializer, UsuarioCreateSerializer,
     HorarioFijoSerializer, HorarioFijoCreateSerializer, HorarioFijoMultipleSerializer, HorarioFijoEditMultipleSerializer,
@@ -526,7 +538,8 @@ def directivo_asistencias(request):
             horario=h,
             defaults={
                 'presente': False,
-                'estado_autorizacion': 'pendiente'
+                'estado_autorizacion': 'pendiente',
+                'horas': 0.00
             }
         )
 
@@ -555,6 +568,7 @@ def directivo_autorizar_asistencia(request, pk):
         return Response(status=status.HTTP_404_NOT_FOUND)
 
     asistencia.estado_autorizacion = 'autorizado'
+    calcular_horas_asistencia(asistencia)
     asistencia.save()
     return Response(AsistenciaSerializer(asistencia).data)
 
@@ -576,6 +590,7 @@ def directivo_rechazar_asistencia(request, pk):
         return Response(status=status.HTTP_404_NOT_FOUND)
 
     asistencia.estado_autorizacion = 'rechazado'
+    calcular_horas_asistencia(asistencia)
     asistencia.save()
     return Response(AsistenciaSerializer(asistencia).data)
 
@@ -605,7 +620,7 @@ def monitor_mis_asistencias(request):
             usuario=usuario,
             fecha=fecha_obj,
             horario=h,
-            defaults={'presente': False, 'estado_autorizacion': 'pendiente'}
+            defaults={'presente': False, 'estado_autorizacion': 'pendiente', 'horas': 0.00}
         )
 
     asistencias_qs = Asistencia.objects.filter(usuario=usuario, fecha=fecha_obj)
@@ -641,7 +656,7 @@ def monitor_marcar(request):
         usuario=usuario,
         fecha=fecha_obj,
         horario=horario,
-        defaults={'presente': False, 'estado_autorizacion': 'pendiente'}
+        defaults={'presente': False, 'estado_autorizacion': 'pendiente', 'horas': 0.00}
     )
 
     # Solo permite marcar si el bloque fue autorizado por un DIRECTIVO
@@ -655,6 +670,7 @@ def monitor_marcar(request):
         )
 
     asistencia.presente = True
+    calcular_horas_asistencia(asistencia)
     asistencia.save()
 
     return Response(AsistenciaSerializer(asistencia).data)
