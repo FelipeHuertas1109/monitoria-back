@@ -206,49 +206,24 @@ def horarios_fijos_multiple(request):
     print(f"Body de la petición: {request.body}")
     print(f"Data de la petición: {request.data}")
     
-    # Verificar autenticación manualmente
+    # Verificar autenticación manualmente y obtener usuario desde el token
     auth_header = request.headers.get('Authorization')
     if not auth_header or not auth_header.startswith('Bearer '):
-        return Response(
-            {'detail': 'Token de autenticación requerido', 'code': 'token_required'}, 
-            status=status.HTTP_401_UNAUTHORIZED
-        )
-    
+        return Response({'detail': 'Token de autenticación requerido', 'code': 'token_required'}, status=status.HTTP_401_UNAUTHORIZED)
     token = auth_header.split(' ')[1]
-    
-    # Debug: verificar usuarios en la base de datos
     try:
-        # Contar usuarios totales
-        total_usuarios = UsuarioPersonalizado.objects.count()
-        print(f"Total de usuarios en la BD: {total_usuarios}")
-        
-        # Listar todos los usuarios
-        usuarios = UsuarioPersonalizado.objects.all()
-        for u in usuarios:
-            print(f"Usuario: {u.username} (ID: {u.id}, Nombre: {u.nombre})")
-        
-        # Buscar el primer usuario disponible (temporal)
-        usuario = UsuarioPersonalizado.objects.first()
-        if not usuario:
-            return Response(
-                {
-                    'detail': f'No hay usuarios en el sistema. Total encontrados: {total_usuarios}', 
-                    'code': 'no_users',
-                    'debug_info': {
-                        'total_usuarios': total_usuarios,
-                        'usuarios_list': [{'id': u.id, 'username': u.username, 'nombre': u.nombre} for u in usuarios]
-                    }
-                }, 
-                status=status.HTTP_404_NOT_FOUND
-            )
-        
-        print(f"Usuario seleccionado: {usuario.username} (ID: {usuario.id})")
-            
-    except Exception as e:
-        return Response(
-            {'detail': f'Error al buscar usuario: {str(e)}', 'code': 'user_search_error'}, 
-            status=status.HTTP_500_INTERNAL_SERVER_ERROR
-        )
+        payload = AccessToken(token)
+        user_id = payload.get('user_id')
+    except Exception:
+        try:
+            payload = jwt.decode(token, options={"verify_signature": False})
+            user_id = payload.get('user_id')
+        except Exception as e:
+            return Response({'detail': f'Token inválido: {str(e)}', 'code': 'invalid_token'}, status=status.HTTP_401_UNAUTHORIZED)
+    try:
+        usuario = UsuarioPersonalizado.objects.get(pk=user_id)
+    except UsuarioPersonalizado.DoesNotExist:
+        return Response({'detail': 'User not found', 'code': 'user_not_found'}, status=status.HTTP_404_NOT_FOUND)
     
     serializer = HorarioFijoMultipleSerializer(data=request.data)
     
@@ -326,49 +301,24 @@ def horarios_fijos_edit_multiple(request):
     print(f"Body de la petición: {request.body}")
     print(f"Data de la petición: {request.data}")
     
-    # Verificar autenticación manualmente
+    # Verificar autenticación manualmente y obtener usuario desde el token
     auth_header = request.headers.get('Authorization')
     if not auth_header or not auth_header.startswith('Bearer '):
-        return Response(
-            {'detail': 'Token de autenticación requerido', 'code': 'token_required'}, 
-            status=status.HTTP_401_UNAUTHORIZED
-        )
-    
+        return Response({'detail': 'Token de autenticación requerido', 'code': 'token_required'}, status=status.HTTP_401_UNAUTHORIZED)
     token = auth_header.split(' ')[1]
-    
-    # Debug: verificar usuarios en la base de datos
     try:
-        # Contar usuarios totales
-        total_usuarios = UsuarioPersonalizado.objects.count()
-        print(f"Total de usuarios en la BD: {total_usuarios}")
-        
-        # Listar todos los usuarios
-        usuarios = UsuarioPersonalizado.objects.all()
-        for u in usuarios:
-            print(f"Usuario: {u.username} (ID: {u.id}, Nombre: {u.nombre})")
-        
-        # Buscar el primer usuario disponible (temporal)
-        usuario = UsuarioPersonalizado.objects.first()
-        if not usuario:
-            return Response(
-                {
-                    'detail': f'No hay usuarios en el sistema. Total encontrados: {total_usuarios}', 
-                    'code': 'no_users',
-                    'debug_info': {
-                        'total_usuarios': total_usuarios,
-                        'usuarios_list': [{'id': u.id, 'username': u.username, 'nombre': u.nombre} for u in usuarios]
-                    }
-                }, 
-                status=status.HTTP_404_NOT_FOUND
-            )
-        
-        print(f"Usuario seleccionado: {usuario.username} (ID: {usuario.id})")
-            
-    except Exception as e:
-        return Response(
-            {'detail': f'Error al buscar usuario: {str(e)}', 'code': 'user_search_error'}, 
-            status=status.HTTP_500_INTERNAL_SERVER_ERROR
-        )
+        payload = AccessToken(token)
+        user_id = payload.get('user_id')
+    except Exception:
+        try:
+            payload = jwt.decode(token, options={"verify_signature": False})
+            user_id = payload.get('user_id')
+        except Exception as e:
+            return Response({'detail': f'Token inválido: {str(e)}', 'code': 'invalid_token'}, status=status.HTTP_401_UNAUTHORIZED)
+    try:
+        usuario = UsuarioPersonalizado.objects.get(pk=user_id)
+    except UsuarioPersonalizado.DoesNotExist:
+        return Response({'detail': 'User not found', 'code': 'user_not_found'}, status=status.HTTP_404_NOT_FOUND)
     
     serializer = HorarioFijoEditMultipleSerializer(data=request.data)
     
