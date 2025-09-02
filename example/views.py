@@ -497,6 +497,76 @@ def _dia_semana_de_fecha(fecha_obj: date) -> int:
 @api_view(['GET'])
 @authentication_classes([])
 @permission_classes([AllowAny])
+def directivo_horarios_monitores(request):
+    """
+    Listar todos los horarios fijos de todos los monitores.
+    Filtros opcionales: usuario_id, dia_semana, jornada, sede
+    Acceso: solo DIRECTIVO
+    """
+    # Autenticación manual
+    auth_header = request.headers.get('Authorization')
+    if not auth_header or not auth_header.startswith('Bearer '):
+        return Response({'detail': 'Token de autenticación requerido'}, status=status.HTTP_401_UNAUTHORIZED)
+
+    # Usuario DIRECTIVO temporal
+    usuario_directivo = UsuarioPersonalizado.objects.filter(tipo_usuario='DIRECTIVO').first()
+    if not usuario_directivo:
+        return Response({'detail': 'No hay usuarios DIRECTIVO'}, status=status.HTTP_403_FORBIDDEN)
+
+    # Parámetros de filtrado
+    usuario_id = request.query_params.get('usuario_id')  # ID específico de monitor
+    dia_semana = request.query_params.get('dia_semana')  # 0-6
+    jornada = request.query_params.get('jornada')  # M|T
+    sede = request.query_params.get('sede')  # SA|BA
+
+    # Query base: solo horarios de monitores
+    horarios_qs = HorarioFijo.objects.filter(usuario__tipo_usuario='MONITOR')
+    
+    # Aplicar filtros
+    if usuario_id:
+        try:
+            usuario_id = int(usuario_id)
+            horarios_qs = horarios_qs.filter(usuario__id=usuario_id)
+        except ValueError:
+            return Response({'detail': 'usuario_id debe ser un número entero'}, status=status.HTTP_400_BAD_REQUEST)
+    
+    if dia_semana is not None:
+        try:
+            dia_semana = int(dia_semana)
+            if dia_semana < 0 or dia_semana > 6:
+                return Response({'detail': 'dia_semana debe ser entre 0-6'}, status=status.HTTP_400_BAD_REQUEST)
+            horarios_qs = horarios_qs.filter(dia_semana=dia_semana)
+        except ValueError:
+            return Response({'detail': 'dia_semana debe ser un número entero'}, status=status.HTTP_400_BAD_REQUEST)
+    
+    if jornada:
+        if jornada not in ['M', 'T']:
+            return Response({'detail': 'jornada debe ser M o T'}, status=status.HTTP_400_BAD_REQUEST)
+        horarios_qs = horarios_qs.filter(jornada=jornada)
+    
+    if sede:
+        if sede not in ['SA', 'BA']:
+            return Response({'detail': 'sede debe ser SA o BA'}, status=status.HTTP_400_BAD_REQUEST)
+        horarios_qs = horarios_qs.filter(sede=sede)
+
+    # Ordenar por usuario, día y jornada para mejor presentación
+    horarios_qs = horarios_qs.order_by('usuario__nombre', 'dia_semana', 'jornada')
+    
+    # Serializar y responder
+    serializer = HorarioFijoSerializer(horarios_qs.select_related('usuario'), many=True)
+    
+    # Agregar información de conteo
+    response_data = {
+        'total_horarios': horarios_qs.count(),
+        'total_monitores': horarios_qs.values('usuario').distinct().count(),
+        'horarios': serializer.data
+    }
+    
+    return Response(response_data)
+
+@api_view(['GET'])
+@authentication_classes([])
+@permission_classes([AllowAny])
 def directivo_asistencias(request):
     """
     Listar asistencias del día (por defecto hoy) para todos los monitores

@@ -18,6 +18,7 @@ urlpatterns = [
     path('asistencias/<int:pk>/', views.asistencia_detalle, name='asistencia_detalle'),
 
     # Directivo
+    path('directivo/horarios/', views.directivo_horarios_monitores, name='directivo_horarios_monitores'),
     path('directivo/asistencias/', views.directivo_asistencias, name='directivo_asistencias'),
     path('directivo/asistencias/<int:pk>/autorizar/', views.directivo_autorizar_asistencia, name='directivo_autorizar_asistencia'),
     path('directivo/asistencias/<int:pk>/rechazar/', views.directivo_rechazar_asistencia, name='directivo_rechazar_asistencia'),

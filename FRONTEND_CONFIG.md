@@ -84,6 +84,40 @@ GET|PUT|DELETE /example/horarios/{id}/
 Headers: { Authorization: "Bearer <token>" }
 ```
 
+### Endpoints para Directivos
+```javascript
+// Listar horarios de todos los monitores (solo DIRECTIVOS)
+GET /example/directivo/horarios/
+Headers: { Authorization: "Bearer <token>" }
+
+// Con filtros opcionales:
+GET /example/directivo/horarios/?usuario_id=5
+GET /example/directivo/horarios/?dia_semana=0
+GET /example/directivo/horarios/?jornada=M&sede=SA
+
+// Respuesta:
+{
+  "total_horarios": 15,
+  "total_monitores": 8,
+  "horarios": [
+    {
+      "id": 1,
+      "usuario": {
+        "id": 3,
+        "username": "monitor1",
+        "nombre": "Juan Monitor"
+      },
+      "dia_semana": 0,
+      "dia_semana_display": "Lunes",
+      "jornada": "M",
+      "jornada_display": "Mañana",
+      "sede": "SA",
+      "sede_display": "San Antonio"
+    }
+  ]
+}
+```
+
 ## 🌐 Configuración CORS
 
 El backend ya está configurado para aceptar peticiones desde:

@@ -253,6 +253,97 @@ Authorization: Bearer <token>
 
 ---
 
+## 👥 Endpoints para Directivos
+
+### Listar Horarios de Todos los Monitores
+**GET** `/example/directivo/horarios/`
+
+**Descripción:** Permite a los directivos ver todos los horarios fijos de todos los monitores del sistema con filtros opcionales.
+
+**Headers:** `Authorization: Bearer <token>` (solo DIRECTIVO)
+
+**Parámetros de consulta (opcionales):**
+- `usuario_id`: ID específico del monitor (número entero)
+- `dia_semana`: Día de la semana (0-6, donde 0=Lunes)
+- `jornada`: Jornada (M=Mañana, T=Tarde)
+- `sede`: Sede (SA=San Antonio, BA=Barcelona)
+
+**Ejemplos de uso:**
+```bash
+# Todos los horarios de todos los monitores
+GET /example/directivo/horarios/
+
+# Horarios de un monitor específico
+GET /example/directivo/horarios/?usuario_id=5
+
+# Horarios de los lunes
+GET /example/directivo/horarios/?dia_semana=0
+
+# Horarios de mañana en San Antonio
+GET /example/directivo/horarios/?jornada=M&sede=SA
+```
+
+**Respuesta Exitosa (200):**
+```json
+{
+  "total_horarios": 15,
+  "total_monitores": 8,
+  "horarios": [
+    {
+      "id": 1,
+      "usuario": {
+        "id": 3,
+        "username": "monitor1",
+        "nombre": "Juan Monitor"
+      },
+      "dia_semana": 0,
+      "dia_semana_display": "Lunes",
+      "jornada": "M",
+      "jornada_display": "Mañana",
+      "sede": "SA",
+      "sede_display": "San Antonio"
+    },
+    {
+      "id": 2,
+      "usuario": {
+        "id": 3,
+        "username": "monitor1", 
+        "nombre": "Juan Monitor"
+      },
+      "dia_semana": 2,
+      "dia_semana_display": "Miércoles",
+      "jornada": "T",
+      "jornada_display": "Tarde",
+      "sede": "BA",
+      "sede_display": "Barcelona"
+    }
+  ]
+}
+```
+
+**Respuesta de Error (400):**
+```json
+{
+  "detail": "dia_semana debe ser entre 0-6"
+}
+```
+
+**Respuesta de Error (401):**
+```json
+{
+  "detail": "Token de autenticación requerido"
+}
+```
+
+**Respuesta de Error (403):**
+```json
+{
+  "detail": "No hay usuarios DIRECTIVO"
+}
+```
+
+---
+
 ## 📊 Códigos de Estado
 
 - **200 OK**: Petición exitosa
