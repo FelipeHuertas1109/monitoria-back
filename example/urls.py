@@ -22,6 +22,10 @@ urlpatterns = [
     path('directivo/asistencias/', views.directivo_asistencias, name='directivo_asistencias'),
     path('directivo/asistencias/<int:pk>/autorizar/', views.directivo_autorizar_asistencia, name='directivo_autorizar_asistencia'),
     path('directivo/asistencias/<int:pk>/rechazar/', views.directivo_rechazar_asistencia, name='directivo_rechazar_asistencia'),
+    
+    # Reportes
+    path('directivo/reportes/horas-monitor/<int:monitor_id>/', views.directivo_reporte_horas_monitor, name='directivo_reporte_horas_monitor'),
+    path('directivo/reportes/horas-todos/', views.directivo_reporte_horas_todos, name='directivo_reporte_horas_todos'),
 
     # Monitor
     path('monitor/mis-asistencias/', views.monitor_mis_asistencias, name='monitor_mis_asistencias'),

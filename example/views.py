@@ -664,6 +664,225 @@ def directivo_rechazar_asistencia(request, pk):
     asistencia.save()
     return Response(AsistenciaSerializer(asistencia).data)
 
+# ===== Endpoints para REPORTES =====
+
+@api_view(['GET'])
+@authentication_classes([])
+@permission_classes([AllowAny])
+def directivo_reporte_horas_monitor(request, monitor_id):
+    """
+    Reporte de horas trabajadas por un monitor específico.
+    Filtros: fecha_inicio, fecha_fin, sede, jornada
+    Acceso: solo DIRECTIVO
+    """
+    # Autenticación manual
+    auth_header = request.headers.get('Authorization')
+    if not auth_header or not auth_header.startswith('Bearer '):
+        return Response({'detail': 'Token de autenticación requerido'}, status=status.HTTP_401_UNAUTHORIZED)
+
+    # Usuario DIRECTIVO temporal
+    usuario_directivo = UsuarioPersonalizado.objects.filter(tipo_usuario='DIRECTIVO').first()
+    if not usuario_directivo:
+        return Response({'detail': 'No hay usuarios DIRECTIVO'}, status=status.HTTP_403_FORBIDDEN)
+
+    # Verificar que el monitor existe
+    try:
+        monitor = UsuarioPersonalizado.objects.get(id=monitor_id, tipo_usuario='MONITOR')
+    except UsuarioPersonalizado.DoesNotExist:
+        return Response({'detail': 'Monitor no encontrado'}, status=status.HTTP_404_NOT_FOUND)
+
+    # Parámetros de filtrado
+    fecha_inicio_str = request.query_params.get('fecha_inicio')
+    fecha_fin_str = request.query_params.get('fecha_fin')
+    sede = request.query_params.get('sede')  # SA|BA
+    jornada = request.query_params.get('jornada')  # M|T
+
+    # Fechas por defecto: último mes
+    if not fecha_inicio_str:
+        from datetime import date, timedelta
+        fecha_inicio = date.today() - timedelta(days=30)
+    else:
+        fecha_inicio = _parse_fecha(fecha_inicio_str)
+    
+    if not fecha_fin_str:
+        fecha_fin = date.today()
+    else:
+        fecha_fin = _parse_fecha(fecha_fin_str)
+
+    # Query base: asistencias del monitor en el rango de fechas
+    asistencias_qs = Asistencia.objects.filter(
+        usuario=monitor,
+        fecha__gte=fecha_inicio,
+        fecha__lte=fecha_fin
+    ).select_related('horario')
+
+    # Aplicar filtros adicionales
+    if sede:
+        if sede not in ['SA', 'BA']:
+            return Response({'detail': 'sede debe ser SA o BA'}, status=status.HTTP_400_BAD_REQUEST)
+        asistencias_qs = asistencias_qs.filter(horario__sede=sede)
+    
+    if jornada:
+        if jornada not in ['M', 'T']:
+            return Response({'detail': 'jornada debe ser M o T'}, status=status.HTTP_400_BAD_REQUEST)
+        asistencias_qs = asistencias_qs.filter(horario__jornada=jornada)
+
+    # Calcular estadísticas
+    total_horas = sum(float(a.horas) for a in asistencias_qs)
+    total_asistencias = asistencias_qs.count()
+    asistencias_presentes = asistencias_qs.filter(presente=True).count()
+    asistencias_autorizadas = asistencias_qs.filter(estado_autorizacion='autorizado').count()
+    
+    # Agrupar por fecha para el detalle
+    asistencias_por_fecha = {}
+    for asistencia in asistencias_qs.order_by('fecha', 'horario__jornada'):
+        fecha_str = asistencia.fecha.strftime('%Y-%m-%d')
+        if fecha_str not in asistencias_por_fecha:
+            asistencias_por_fecha[fecha_str] = []
+        asistencias_por_fecha[fecha_str].append(AsistenciaSerializer(asistencia).data)
+
+    # Respuesta
+    response_data = {
+        'monitor': {
+            'id': monitor.id,
+            'username': monitor.username,
+            'nombre': monitor.nombre
+        },
+        'periodo': {
+            'fecha_inicio': fecha_inicio.strftime('%Y-%m-%d'),
+            'fecha_fin': fecha_fin.strftime('%Y-%m-%d')
+        },
+        'estadisticas': {
+            'total_horas': round(total_horas, 2),
+            'total_asistencias': total_asistencias,
+            'asistencias_presentes': asistencias_presentes,
+            'asistencias_autorizadas': asistencias_autorizadas,
+            'promedio_horas_por_dia': round(total_horas / max(1, (fecha_fin - fecha_inicio).days + 1), 2)
+        },
+        'filtros_aplicados': {
+            'sede': sede,
+            'jornada': jornada
+        },
+        'detalle_por_fecha': asistencias_por_fecha
+    }
+
+    return Response(response_data)
+
+@api_view(['GET'])
+@authentication_classes([])
+@permission_classes([AllowAny])
+def directivo_reporte_horas_todos(request):
+    """
+    Reporte de horas trabajadas por todos los monitores.
+    Filtros: fecha_inicio, fecha_fin, sede, jornada
+    Acceso: solo DIRECTIVO
+    """
+    # Autenticación manual
+    auth_header = request.headers.get('Authorization')
+    if not auth_header or not auth_header.startswith('Bearer '):
+        return Response({'detail': 'Token de autenticación requerido'}, status=status.HTTP_401_UNAUTHORIZED)
+
+    # Usuario DIRECTIVO temporal
+    usuario_directivo = UsuarioPersonalizado.objects.filter(tipo_usuario='DIRECTIVO').first()
+    if not usuario_directivo:
+        return Response({'detail': 'No hay usuarios DIRECTIVO'}, status=status.HTTP_403_FORBIDDEN)
+
+    # Parámetros de filtrado
+    fecha_inicio_str = request.query_params.get('fecha_inicio')
+    fecha_fin_str = request.query_params.get('fecha_fin')
+    sede = request.query_params.get('sede')  # SA|BA
+    jornada = request.query_params.get('jornada')  # M|T
+
+    # Fechas por defecto: último mes
+    if not fecha_inicio_str:
+        from datetime import date, timedelta
+        fecha_inicio = date.today() - timedelta(days=30)
+    else:
+        fecha_inicio = _parse_fecha(fecha_inicio_str)
+    
+    if not fecha_fin_str:
+        fecha_fin = date.today()
+    else:
+        fecha_fin = _parse_fecha(fecha_fin_str)
+
+    # Query base: asistencias de todos los monitores en el rango de fechas
+    asistencias_qs = Asistencia.objects.filter(
+        usuario__tipo_usuario='MONITOR',
+        fecha__gte=fecha_inicio,
+        fecha__lte=fecha_fin
+    ).select_related('usuario', 'horario')
+
+    # Aplicar filtros adicionales
+    if sede:
+        if sede not in ['SA', 'BA']:
+            return Response({'detail': 'sede debe ser SA o BA'}, status=status.HTTP_400_BAD_REQUEST)
+        asistencias_qs = asistencias_qs.filter(horario__sede=sede)
+    
+    if jornada:
+        if jornada not in ['M', 'T']:
+            return Response({'detail': 'jornada debe ser M o T'}, status=status.HTTP_400_BAD_REQUEST)
+        asistencias_qs = asistencias_qs.filter(horario__jornada=jornada)
+
+    # Agrupar por monitor
+    monitores_data = {}
+    for asistencia in asistencias_qs:
+        monitor_id = asistencia.usuario.id
+        if monitor_id not in monitores_data:
+            monitores_data[monitor_id] = {
+                'monitor': {
+                    'id': asistencia.usuario.id,
+                    'username': asistencia.usuario.username,
+                    'nombre': asistencia.usuario.nombre
+                },
+                'total_horas': 0.0,
+                'total_asistencias': 0,
+                'asistencias_presentes': 0,
+                'asistencias_autorizadas': 0,
+                'asistencias': []
+            }
+        
+        monitores_data[monitor_id]['total_horas'] += float(asistencia.horas)
+        monitores_data[monitor_id]['total_asistencias'] += 1
+        if asistencia.presente:
+            monitores_data[monitor_id]['asistencias_presentes'] += 1
+        if asistencia.estado_autorizacion == 'autorizado':
+            monitores_data[monitor_id]['asistencias_autorizadas'] += 1
+        
+        monitores_data[monitor_id]['asistencias'].append(AsistenciaSerializer(asistencia).data)
+
+    # Calcular estadísticas generales
+    total_horas_general = sum(data['total_horas'] for data in monitores_data.values())
+    total_asistencias_general = sum(data['total_asistencias'] for data in monitores_data.values())
+    total_monitores = len(monitores_data)
+
+    # Ordenar monitores por horas trabajadas (descendente)
+    monitores_ordenados = sorted(
+        monitores_data.values(),
+        key=lambda x: x['total_horas'],
+        reverse=True
+    )
+
+    # Respuesta
+    response_data = {
+        'periodo': {
+            'fecha_inicio': fecha_inicio.strftime('%Y-%m-%d'),
+            'fecha_fin': fecha_fin.strftime('%Y-%m-%d')
+        },
+        'estadisticas_generales': {
+            'total_horas': round(total_horas_general, 2),
+            'total_asistencias': total_asistencias_general,
+            'total_monitores': total_monitores,
+            'promedio_horas_por_monitor': round(total_horas_general / max(1, total_monitores), 2)
+        },
+        'filtros_aplicados': {
+            'sede': sede,
+            'jornada': jornada
+        },
+        'monitores': monitores_ordenados
+    }
+
+    return Response(response_data)
+
 # ===== Endpoints para MONITORES =====
 
 @api_view(['GET'])

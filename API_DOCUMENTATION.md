@@ -344,6 +344,153 @@ GET /example/directivo/horarios/?jornada=M&sede=SA
 
 ---
 
+## 📈 Endpoints para Reportes
+
+### Reporte de Horas por Monitor Individual
+**GET** `/example/directivo/reportes/horas-monitor/{monitor_id}/`
+
+**Descripción:** Genera un reporte detallado de las horas trabajadas por un monitor específico en un período determinado.
+
+**Headers:** `Authorization: Bearer <token>` (solo DIRECTIVO)
+
+**Parámetros de consulta (opcionales):**
+- `fecha_inicio`: Fecha de inicio del reporte (YYYY-MM-DD). Por defecto: 30 días atrás
+- `fecha_fin`: Fecha de fin del reporte (YYYY-MM-DD). Por defecto: hoy
+- `sede`: Filtrar por sede (SA=San Antonio, BA=Barcelona)
+- `jornada`: Filtrar por jornada (M=Mañana, T=Tarde)
+
+**Ejemplos de uso:**
+```bash
+# Reporte del último mes para el monitor ID 3
+GET /example/directivo/reportes/horas-monitor/3/
+
+# Reporte de enero 2024 para el monitor ID 3
+GET /example/directivo/reportes/horas-monitor/3/?fecha_inicio=2024-01-01&fecha_fin=2024-01-31
+
+# Reporte solo de mañana en San Antonio
+GET /example/directivo/reportes/horas-monitor/3/?jornada=M&sede=SA
+```
+
+**Respuesta Exitosa (200):**
+```json
+{
+  "monitor": {
+    "id": 3,
+    "username": "monitor1",
+    "nombre": "Juan Monitor"
+  },
+  "periodo": {
+    "fecha_inicio": "2024-01-01",
+    "fecha_fin": "2024-01-31"
+  },
+  "estadisticas": {
+    "total_horas": 64.0,
+    "total_asistencias": 16,
+    "asistencias_presentes": 14,
+    "asistencias_autorizadas": 15,
+    "promedio_horas_por_dia": 2.06
+  },
+  "filtros_aplicados": {
+    "sede": "SA",
+    "jornada": "M"
+  },
+  "detalle_por_fecha": {
+    "2024-01-15": [
+      {
+        "id": 1,
+        "usuario": {...},
+        "fecha": "2024-01-15",
+        "horario": {...},
+        "presente": true,
+        "estado_autorizacion": "autorizado",
+        "estado_autorizacion_display": "Autorizado",
+        "horas": 4.00
+      }
+    ]
+  }
+}
+```
+
+### Reporte de Horas de Todos los Monitores
+**GET** `/example/directivo/reportes/horas-todos/`
+
+**Descripción:** Genera un reporte consolidado de las horas trabajadas por todos los monitores en un período determinado.
+
+**Headers:** `Authorization: Bearer <token>` (solo DIRECTIVO)
+
+**Parámetros de consulta (opcionales):**
+- `fecha_inicio`: Fecha de inicio del reporte (YYYY-MM-DD). Por defecto: 30 días atrás
+- `fecha_fin`: Fecha de fin del reporte (YYYY-MM-DD). Por defecto: hoy
+- `sede`: Filtrar por sede (SA=San Antonio, BA=Barcelona)
+- `jornada`: Filtrar por jornada (M=Mañana, T=Tarde)
+
+**Ejemplos de uso:**
+```bash
+# Reporte del último mes para todos los monitores
+GET /example/directivo/reportes/horas-todos/
+
+# Reporte de enero 2024 para todos los monitores
+GET /example/directivo/reportes/horas-todos/?fecha_inicio=2024-01-01&fecha_fin=2024-01-31
+
+# Reporte solo de mañana en San Antonio
+GET /example/directivo/reportes/horas-todos/?jornada=M&sede=SA
+```
+
+**Respuesta Exitosa (200):**
+```json
+{
+  "periodo": {
+    "fecha_inicio": "2024-01-01",
+    "fecha_fin": "2024-01-31"
+  },
+  "estadisticas_generales": {
+    "total_horas": 256.0,
+    "total_asistencias": 64,
+    "total_monitores": 8,
+    "promedio_horas_por_monitor": 32.0
+  },
+  "filtros_aplicados": {
+    "sede": "SA",
+    "jornada": "M"
+  },
+  "monitores": [
+    {
+      "monitor": {
+        "id": 3,
+        "username": "monitor1",
+        "nombre": "Juan Monitor"
+      },
+      "total_horas": 64.0,
+      "total_asistencias": 16,
+      "asistencias_presentes": 14,
+      "asistencias_autorizadas": 15,
+      "asistencias": [...]
+    },
+    {
+      "monitor": {
+        "id": 4,
+        "username": "monitor2",
+        "nombre": "María Monitor"
+      },
+      "total_horas": 48.0,
+      "total_asistencias": 12,
+      "asistencias_presentes": 12,
+      "asistencias_autorizadas": 12,
+      "asistencias": [...]
+    }
+  ]
+}
+```
+
+**Respuesta de Error (404):**
+```json
+{
+  "detail": "Monitor no encontrado"
+}
+```
+
+---
+
 ## 📊 Códigos de Estado
 
 - **200 OK**: Petición exitosa
