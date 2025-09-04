@@ -688,6 +688,68 @@ GET /example/directivo/ajustes-horas/?fecha_inicio=2024-01-01&fecha_fin=2024-01-
 }
 ```
 
+### Buscar Monitores
+**GET** `/example/directivo/buscar-monitores/`
+
+**Descripción:** Permite a los directivos buscar monitores por nombre o username para obtener su ID. Útil para formularios de ajustes de horas.
+
+**Headers:** `Authorization: Bearer <token>` (solo DIRECTIVO)
+
+**Parámetros de consulta:**
+- `q`: (requerido) Término de búsqueda (mínimo 2 caracteres)
+
+**Ejemplos de uso:**
+```bash
+# Buscar monitores por nombre
+GET /example/directivo/buscar-monitores/?q=juan
+
+# Buscar por username
+GET /example/directivo/buscar-monitores/?q=monitor1
+
+# Búsqueda parcial
+GET /example/directivo/buscar-monitores/?q=mar
+```
+
+**Respuesta Exitosa (200):**
+```json
+{
+  "busqueda": "juan",
+  "total_encontrados": 2,
+  "monitores": [
+    {
+      "id": 3,
+      "username": "monitor1",
+      "nombre": "Juan Monitor"
+    },
+    {
+      "id": 7,
+      "username": "jperez",
+      "nombre": "Juan Pérez"
+    }
+  ]
+}
+```
+
+**Respuesta de Error (400):**
+```json
+{
+  "detail": "Parámetro de búsqueda \"q\" es requerido"
+}
+```
+
+**O:**
+```json
+{
+  "detail": "La búsqueda debe tener al menos 2 caracteres"
+}
+```
+
+**Características:**
+- Búsqueda case-insensitive en nombre y username
+- Máximo 20 resultados por búsqueda
+- Resultados ordenados por nombre
+- Solo busca usuarios de tipo MONITOR
+
 ---
 
 ## 📊 Códigos de Estado

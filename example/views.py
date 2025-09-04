@@ -1178,3 +1178,56 @@ def directivo_ajuste_horas_detalle(request, pk):
     elif request.method == 'DELETE':
         ajuste.delete()
         return Response({'detail': 'Ajuste de horas eliminado exitosamente'}, status=status.HTTP_204_NO_CONTENT)
+
+
+@api_view(['GET'])
+@authentication_classes([])
+@permission_classes([AllowAny])
+def directivo_buscar_monitores(request):
+    """
+    Buscar monitores por nombre o username.
+    Acceso: solo DIRECTIVO
+    """
+    # Autenticación manual
+    auth_header = request.headers.get('Authorization')
+    if not auth_header or not auth_header.startswith('Bearer '):
+        return Response({'detail': 'Token de autenticación requerido'}, status=status.HTTP_401_UNAUTHORIZED)
+
+    # Usuario DIRECTIVO temporal
+    usuario_directivo = UsuarioPersonalizado.objects.filter(tipo_usuario='DIRECTIVO').first()
+    if not usuario_directivo:
+        return Response({'detail': 'No hay usuarios DIRECTIVO'}, status=status.HTTP_403_FORBIDDEN)
+
+    # Parámetro de búsqueda
+    busqueda = request.query_params.get('q', '').strip()
+    
+    if not busqueda:
+        return Response({'detail': 'Parámetro de búsqueda "q" es requerido'}, status=status.HTTP_400_BAD_REQUEST)
+    
+    if len(busqueda) < 2:
+        return Response({'detail': 'La búsqueda debe tener al menos 2 caracteres'}, status=status.HTTP_400_BAD_REQUEST)
+
+    # Buscar monitores por nombre o username (case-insensitive)
+    from django.db.models import Q
+    monitores = UsuarioPersonalizado.objects.filter(
+        tipo_usuario='MONITOR'
+    ).filter(
+        Q(nombre__icontains=busqueda) | Q(username__icontains=busqueda)
+    ).order_by('nombre')[:20]  # Limitar a 20 resultados
+
+    # Serializar resultados
+    resultados = []
+    for monitor in monitores:
+        resultados.append({
+            'id': monitor.id,
+            'username': monitor.username,
+            'nombre': monitor.nombre
+        })
+
+    response_data = {
+        'busqueda': busqueda,
+        'total_encontrados': len(resultados),
+        'monitores': resultados
+    }
+
+    return Response(response_data)
