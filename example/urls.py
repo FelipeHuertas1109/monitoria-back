@@ -30,4 +30,8 @@ urlpatterns = [
     # Monitor
     path('monitor/mis-asistencias/', views.monitor_mis_asistencias, name='monitor_mis_asistencias'),
     path('monitor/marcar/', views.monitor_marcar, name='monitor_marcar'),
+    
+    # Ajustes de Horas
+    path('directivo/ajustes-horas/', views.directivo_ajustes_horas, name='directivo_ajustes_horas'),
+    path('directivo/ajustes-horas/<int:pk>/', views.directivo_ajuste_horas_detalle, name='directivo_ajuste_horas_detalle'),
 ]

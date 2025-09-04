@@ -112,3 +112,50 @@ class Asistencia(models.Model):
     def __str__(self):
         estado = "Presente" if self.presente else "Pendiente"
         return f"{self.usuario} - {self.fecha} - {self.horario} [{estado} | {self.estado_autorizacion}]"
+
+
+class AjusteHoras(models.Model):
+    """
+    Modelo para ajustes manuales de horas realizados por directivos.
+    Permite agregar o restar horas a monitores con trazabilidad completa.
+    """
+    usuario = models.ForeignKey(
+        UsuarioPersonalizado, 
+        on_delete=models.CASCADE, 
+        related_name="ajustes_horas",
+        limit_choices_to={'tipo_usuario': 'MONITOR'},
+        help_text="Monitor al que se le ajustan las horas"
+    )
+    fecha = models.DateField(help_text="Fecha del ajuste de horas")
+    cantidad_horas = models.DecimalField(
+        max_digits=5, 
+        decimal_places=2, 
+        help_text="Cantidad de horas a ajustar (positivo para agregar, negativo para restar)"
+    )
+    motivo = models.TextField(help_text="Razón del ajuste de horas")
+    asistencia = models.ForeignKey(
+        Asistencia, 
+        on_delete=models.SET_NULL, 
+        null=True, 
+        blank=True,
+        related_name="ajustes_horas",
+        help_text="Asistencia relacionada (opcional)"
+    )
+    creado_por = models.ForeignKey(
+        UsuarioPersonalizado,
+        on_delete=models.CASCADE,
+        related_name="ajustes_creados",
+        limit_choices_to={'tipo_usuario': 'DIRECTIVO'},
+        help_text="Directivo que realizó el ajuste"
+    )
+    created_at = models.DateTimeField(auto_now_add=True, help_text="Fecha y hora de creación del ajuste")
+    updated_at = models.DateTimeField(auto_now=True, help_text="Fecha y hora de última modificación")
+
+    class Meta:
+        ordering = ['-created_at']
+        verbose_name = "Ajuste de Horas"
+        verbose_name_plural = "Ajustes de Horas"
+
+    def __str__(self):
+        signo = "+" if self.cantidad_horas >= 0 else ""
+        return f"{self.usuario.nombre} - {self.fecha} - {signo}{self.cantidad_horas}h - {self.motivo[:50]}"

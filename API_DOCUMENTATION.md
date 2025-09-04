@@ -349,7 +349,7 @@ GET /example/directivo/horarios/?jornada=M&sede=SA
 ### Reporte de Horas por Monitor Individual
 **GET** `/example/directivo/reportes/horas-monitor/{monitor_id}/`
 
-**Descripción:** Genera un reporte detallado de las horas trabajadas por un monitor específico en un período determinado.
+**Descripción:** Genera un reporte detallado de las horas trabajadas por un monitor específico en un período determinado. **Incluye tanto horas de asistencias como ajustes manuales de horas.**
 
 **Headers:** `Authorization: Bearer <token>` (solo DIRECTIVO)
 
@@ -384,8 +384,11 @@ GET /example/directivo/reportes/horas-monitor/3/?jornada=M&sede=SA
     "fecha_fin": "2024-01-31"
   },
   "estadisticas": {
+    "horas_asistencias": 60.0,
+    "horas_ajustes": 4.0,
     "total_horas": 64.0,
     "total_asistencias": 16,
+    "total_ajustes": 1,
     "asistencias_presentes": 14,
     "asistencias_autorizadas": 15,
     "promedio_horas_por_dia": 2.06
@@ -407,6 +410,20 @@ GET /example/directivo/reportes/horas-monitor/3/?jornada=M&sede=SA
         "horas": 4.00
       }
     ]
+  },
+  "ajustes_por_fecha": {
+    "2024-01-16": [
+      {
+        "id": 1,
+        "usuario": {...},
+        "fecha": "2024-01-16",
+        "cantidad_horas": 4.00,
+        "motivo": "Recuperación por día perdido",
+        "asistencia": null,
+        "creado_por": {...},
+        "created_at": "2024-01-16T09:00:00Z"
+      }
+    ]
   }
 }
 ```
@@ -414,7 +431,7 @@ GET /example/directivo/reportes/horas-monitor/3/?jornada=M&sede=SA
 ### Reporte de Horas de Todos los Monitores
 **GET** `/example/directivo/reportes/horas-todos/`
 
-**Descripción:** Genera un reporte consolidado de las horas trabajadas por todos los monitores en un período determinado.
+**Descripción:** Genera un reporte consolidado de las horas trabajadas por todos los monitores en un período determinado. **Incluye tanto horas de asistencias como ajustes manuales de horas.**
 
 **Headers:** `Authorization: Bearer <token>` (solo DIRECTIVO)
 
@@ -446,6 +463,7 @@ GET /example/directivo/reportes/horas-todos/?jornada=M&sede=SA
   "estadisticas_generales": {
     "total_horas": 256.0,
     "total_asistencias": 64,
+    "total_ajustes": 8,
     "total_monitores": 8,
     "promedio_horas_por_monitor": 32.0
   },
@@ -460,11 +478,15 @@ GET /example/directivo/reportes/horas-todos/?jornada=M&sede=SA
         "username": "monitor1",
         "nombre": "Juan Monitor"
       },
+      "horas_asistencias": 60.0,
+      "horas_ajustes": 4.0,
       "total_horas": 64.0,
       "total_asistencias": 16,
+      "total_ajustes": 1,
       "asistencias_presentes": 14,
       "asistencias_autorizadas": 15,
-      "asistencias": [...]
+      "asistencias": [...],
+      "ajustes": [...]
     },
     {
       "monitor": {
@@ -472,11 +494,15 @@ GET /example/directivo/reportes/horas-todos/?jornada=M&sede=SA
         "username": "monitor2",
         "nombre": "María Monitor"
       },
+      "horas_asistencias": 48.0,
+      "horas_ajustes": 0.0,
       "total_horas": 48.0,
       "total_asistencias": 12,
+      "total_ajustes": 0,
       "asistencias_presentes": 12,
       "asistencias_autorizadas": 12,
-      "asistencias": [...]
+      "asistencias": [...],
+      "ajustes": []
     }
   ]
 }
@@ -486,6 +512,179 @@ GET /example/directivo/reportes/horas-todos/?jornada=M&sede=SA
 ```json
 {
   "detail": "Monitor no encontrado"
+}
+```
+
+---
+
+## 🔧 Endpoints para Ajustes de Horas
+
+### Listar y Crear Ajustes de Horas
+**GET/POST** `/example/directivo/ajustes-horas/`
+
+**Descripción:** Permite a los directivos listar ajustes de horas existentes y crear nuevos ajustes para dar o quitar horas a monitores.
+
+**Headers:** `Authorization: Bearer <token>` (solo DIRECTIVO)
+
+#### GET - Listar Ajustes
+**Parámetros de consulta (opcionales):**
+- `monitor_id`: ID específico del monitor (número entero)
+- `fecha_inicio`: Fecha de inicio del filtro (YYYY-MM-DD). Por defecto: 30 días atrás
+- `fecha_fin`: Fecha de fin del filtro (YYYY-MM-DD). Por defecto: hoy
+
+**Ejemplos de uso:**
+```bash
+# Todos los ajustes del último mes
+GET /example/directivo/ajustes-horas/
+
+# Ajustes de un monitor específico
+GET /example/directivo/ajustes-horas/?monitor_id=3
+
+# Ajustes en un período específico
+GET /example/directivo/ajustes-horas/?fecha_inicio=2024-01-01&fecha_fin=2024-01-31
+```
+
+**Respuesta Exitosa (200):**
+```json
+{
+  "periodo": {
+    "fecha_inicio": "2024-01-01",
+    "fecha_fin": "2024-01-31"
+  },
+  "estadisticas": {
+    "total_ajustes": 5,
+    "total_horas_ajustadas": 12.5,
+    "monitores_afectados": 3
+  },
+  "filtros_aplicados": {
+    "monitor_id": null
+  },
+  "ajustes": [
+    {
+      "id": 1,
+      "usuario": {
+        "id": 3,
+        "username": "monitor1",
+        "nombre": "Juan Monitor"
+      },
+      "fecha": "2024-01-15",
+      "cantidad_horas": 4.00,
+      "motivo": "Recuperación por día perdido por enfermedad",
+      "asistencia": null,
+      "creado_por": {
+        "id": 1,
+        "username": "directivo1",
+        "nombre": "María Directivo"
+      },
+      "created_at": "2024-01-15T10:30:00Z",
+      "updated_at": "2024-01-15T10:30:00Z"
+    }
+  ]
+}
+```
+
+#### POST - Crear Ajuste
+**Body:**
+```json
+{
+  "monitor_id": 3,
+  "fecha": "2024-01-15",
+  "cantidad_horas": 4.00,
+  "motivo": "Recuperación por día perdido por enfermedad",
+  "asistencia_id": 25
+}
+```
+
+**Campos:**
+- `monitor_id`: (requerido) ID del monitor al que se le ajustan las horas
+- `fecha`: (requerido) Fecha del ajuste en formato YYYY-MM-DD
+- `cantidad_horas`: (requerido) Cantidad de horas (positivo para agregar, negativo para restar). Rango: -24.00 a 24.00
+- `motivo`: (requerido) Descripción del motivo del ajuste
+- `asistencia_id`: (opcional) ID de la asistencia relacionada si aplica
+
+**Validaciones:**
+- `monitor_id` debe existir y ser de tipo MONITOR
+- `cantidad_horas` no puede ser 0 y debe estar entre -24.00 y 24.00
+- Si se proporciona `asistencia_id`, debe existir y pertenecer al monitor especificado
+
+**Respuesta Exitosa (201):**
+```json
+{
+  "id": 1,
+  "usuario": {
+    "id": 3,
+    "username": "monitor1",
+    "nombre": "Juan Monitor"
+  },
+  "fecha": "2024-01-15",
+  "cantidad_horas": 4.00,
+  "motivo": "Recuperación por día perdido por enfermedad",
+  "asistencia": {
+    "id": 25,
+    "fecha": "2024-01-10",
+    "presente": false,
+    "estado_autorizacion": "rechazado"
+  },
+  "creado_por": {
+    "id": 1,
+    "username": "directivo1",
+    "nombre": "María Directivo"
+  },
+  "created_at": "2024-01-15T10:30:00Z",
+  "updated_at": "2024-01-15T10:30:00Z"
+}
+```
+
+**Respuesta de Error (400):**
+```json
+{
+  "cantidad_horas": ["La cantidad de horas debe estar entre -24.00 y 24.00."]
+}
+```
+
+### Detalles y Eliminar Ajuste
+**GET/DELETE** `/example/directivo/ajustes-horas/{id}/`
+
+**Headers:** `Authorization: Bearer <token>` (solo DIRECTIVO)
+
+#### GET - Obtener Detalles
+**Respuesta Exitosa (200):**
+```json
+{
+  "id": 1,
+  "usuario": {
+    "id": 3,
+    "username": "monitor1",
+    "nombre": "Juan Monitor"
+  },
+  "fecha": "2024-01-15",
+  "cantidad_horas": 4.00,
+  "motivo": "Recuperación por día perdido por enfermedad",
+  "asistencia": null,
+  "creado_por": {
+    "id": 1,
+    "username": "directivo1",
+    "nombre": "María Directivo"
+  },
+  "created_at": "2024-01-15T10:30:00Z",
+  "updated_at": "2024-01-15T10:30:00Z"
+}
+```
+
+#### DELETE - Eliminar Ajuste
+**Descripción:** Elimina un ajuste de horas. Útil para corregir errores.
+
+**Respuesta Exitosa (204):**
+```json
+{
+  "detail": "Ajuste de horas eliminado exitosamente"
+}
+```
+
+**Respuesta de Error (404):**
+```json
+{
+  "detail": "Ajuste de horas no encontrado"
 }
 ```
 

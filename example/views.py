@@ -11,7 +11,7 @@ from rest_framework_simplejwt.exceptions import InvalidToken, TokenError
 from django.contrib.auth import authenticate
 from django.utils import timezone
 from datetime import datetime, date
-from .models import UsuarioPersonalizado, HorarioFijo, Asistencia
+from .models import UsuarioPersonalizado, HorarioFijo, Asistencia, AjusteHoras
 
 def calcular_horas_asistencia(asistencia):
     """
@@ -24,10 +24,48 @@ def calcular_horas_asistencia(asistencia):
     else:
         asistencia.horas = 0.00
     return asistencia
+
+
+def calcular_horas_totales_monitor(monitor_id, fecha_inicio, fecha_fin, sede=None, jornada=None):
+    """
+    Calcula las horas totales de un monitor incluyendo asistencias y ajustes de horas.
+    Retorna diccionario con horas_asistencias, horas_ajustes, horas_totales
+    """
+    # Horas de asistencias
+    asistencias_qs = Asistencia.objects.filter(
+        usuario_id=monitor_id,
+        fecha__gte=fecha_inicio,
+        fecha__lte=fecha_fin
+    ).select_related('horario')
+    
+    # Aplicar filtros adicionales si se proporcionan
+    if sede:
+        asistencias_qs = asistencias_qs.filter(horario__sede=sede)
+    if jornada:
+        asistencias_qs = asistencias_qs.filter(horario__jornada=jornada)
+    
+    horas_asistencias = sum(float(asistencia.horas) for asistencia in asistencias_qs)
+    
+    # Horas de ajustes
+    ajustes_qs = AjusteHoras.objects.filter(
+        usuario_id=monitor_id,
+        fecha__gte=fecha_inicio,
+        fecha__lte=fecha_fin
+    )
+    
+    horas_ajustes = sum(float(ajuste.cantidad_horas) for ajuste in ajustes_qs)
+    
+    return {
+        'horas_asistencias': horas_asistencias,
+        'horas_ajustes': horas_ajustes,
+        'horas_totales': horas_asistencias + horas_ajustes,
+        'total_asistencias': asistencias_qs.count(),
+        'total_ajustes': ajustes_qs.count()
+    }
 from .serializers import (
     LoginSerializer, TokenSerializer, UsuarioSerializer, UsuarioCreateSerializer,
     HorarioFijoSerializer, HorarioFijoCreateSerializer, HorarioFijoMultipleSerializer, HorarioFijoEditMultipleSerializer,
-    AsistenciaSerializer, AsistenciaCreateSerializer
+    AsistenciaSerializer, AsistenciaCreateSerializer, AjusteHorasSerializer, AjusteHorasCreateSerializer
 )
 
 # Autenticación personalizada para JWT con nuestro modelo
@@ -709,37 +747,54 @@ def directivo_reporte_horas_monitor(request, monitor_id):
     else:
         fecha_fin = _parse_fecha(fecha_fin_str)
 
-    # Query base: asistencias del monitor en el rango de fechas
+    # Validar filtros
+    if sede and sede not in ['SA', 'BA']:
+        return Response({'detail': 'sede debe ser SA o BA'}, status=status.HTTP_400_BAD_REQUEST)
+    if jornada and jornada not in ['M', 'T']:
+        return Response({'detail': 'jornada debe ser M o T'}, status=status.HTTP_400_BAD_REQUEST)
+
+    # Calcular horas totales incluyendo ajustes
+    calculo_horas = calcular_horas_totales_monitor(monitor_id, fecha_inicio, fecha_fin, sede, jornada)
+
+    # Query asistencias para el detalle
     asistencias_qs = Asistencia.objects.filter(
         usuario=monitor,
         fecha__gte=fecha_inicio,
         fecha__lte=fecha_fin
     ).select_related('horario')
 
-    # Aplicar filtros adicionales
+    # Aplicar filtros adicionales para asistencias
     if sede:
-        if sede not in ['SA', 'BA']:
-            return Response({'detail': 'sede debe ser SA o BA'}, status=status.HTTP_400_BAD_REQUEST)
         asistencias_qs = asistencias_qs.filter(horario__sede=sede)
-    
     if jornada:
-        if jornada not in ['M', 'T']:
-            return Response({'detail': 'jornada debe ser M o T'}, status=status.HTTP_400_BAD_REQUEST)
         asistencias_qs = asistencias_qs.filter(horario__jornada=jornada)
 
-    # Calcular estadísticas
-    total_horas = sum(float(a.horas) for a in asistencias_qs)
-    total_asistencias = asistencias_qs.count()
+    # Estadísticas de asistencias
     asistencias_presentes = asistencias_qs.filter(presente=True).count()
     asistencias_autorizadas = asistencias_qs.filter(estado_autorizacion='autorizado').count()
     
-    # Agrupar por fecha para el detalle
+    # Agrupar asistencias por fecha para el detalle
     asistencias_por_fecha = {}
     for asistencia in asistencias_qs.order_by('fecha', 'horario__jornada'):
         fecha_str = asistencia.fecha.strftime('%Y-%m-%d')
         if fecha_str not in asistencias_por_fecha:
             asistencias_por_fecha[fecha_str] = []
         asistencias_por_fecha[fecha_str].append(AsistenciaSerializer(asistencia).data)
+
+    # Query ajustes para el detalle
+    ajustes_qs = AjusteHoras.objects.filter(
+        usuario=monitor,
+        fecha__gte=fecha_inicio,
+        fecha__lte=fecha_fin
+    ).select_related('creado_por', 'asistencia')
+
+    # Agrupar ajustes por fecha
+    ajustes_por_fecha = {}
+    for ajuste in ajustes_qs.order_by('fecha', 'created_at'):
+        fecha_str = ajuste.fecha.strftime('%Y-%m-%d')
+        if fecha_str not in ajustes_por_fecha:
+            ajustes_por_fecha[fecha_str] = []
+        ajustes_por_fecha[fecha_str].append(AjusteHorasSerializer(ajuste).data)
 
     # Respuesta
     response_data = {
@@ -753,17 +808,21 @@ def directivo_reporte_horas_monitor(request, monitor_id):
             'fecha_fin': fecha_fin.strftime('%Y-%m-%d')
         },
         'estadisticas': {
-            'total_horas': round(total_horas, 2),
-            'total_asistencias': total_asistencias,
+            'horas_asistencias': round(calculo_horas['horas_asistencias'], 2),
+            'horas_ajustes': round(calculo_horas['horas_ajustes'], 2),
+            'total_horas': round(calculo_horas['horas_totales'], 2),
+            'total_asistencias': calculo_horas['total_asistencias'],
+            'total_ajustes': calculo_horas['total_ajustes'],
             'asistencias_presentes': asistencias_presentes,
             'asistencias_autorizadas': asistencias_autorizadas,
-            'promedio_horas_por_dia': round(total_horas / max(1, (fecha_fin - fecha_inicio).days + 1), 2)
+            'promedio_horas_por_dia': round(calculo_horas['horas_totales'] / max(1, (fecha_fin - fecha_inicio).days + 1), 2)
         },
         'filtros_aplicados': {
             'sede': sede,
             'jornada': jornada
         },
-        'detalle_por_fecha': asistencias_por_fecha
+        'detalle_por_fecha': asistencias_por_fecha,
+        'ajustes_por_fecha': ajustes_por_fecha
     }
 
     return Response(response_data)
@@ -805,54 +864,72 @@ def directivo_reporte_horas_todos(request):
     else:
         fecha_fin = _parse_fecha(fecha_fin_str)
 
-    # Query base: asistencias de todos los monitores en el rango de fechas
-    asistencias_qs = Asistencia.objects.filter(
-        usuario__tipo_usuario='MONITOR',
-        fecha__gte=fecha_inicio,
-        fecha__lte=fecha_fin
-    ).select_related('usuario', 'horario')
+    # Validar filtros
+    if sede and sede not in ['SA', 'BA']:
+        return Response({'detail': 'sede debe ser SA o BA'}, status=status.HTTP_400_BAD_REQUEST)
+    if jornada and jornada not in ['M', 'T']:
+        return Response({'detail': 'jornada debe ser M o T'}, status=status.HTTP_400_BAD_REQUEST)
 
-    # Aplicar filtros adicionales
-    if sede:
-        if sede not in ['SA', 'BA']:
-            return Response({'detail': 'sede debe ser SA o BA'}, status=status.HTTP_400_BAD_REQUEST)
-        asistencias_qs = asistencias_qs.filter(horario__sede=sede)
+    # Obtener todos los monitores
+    monitores = UsuarioPersonalizado.objects.filter(tipo_usuario='MONITOR')
     
-    if jornada:
-        if jornada not in ['M', 'T']:
-            return Response({'detail': 'jornada debe ser M o T'}, status=status.HTTP_400_BAD_REQUEST)
-        asistencias_qs = asistencias_qs.filter(horario__jornada=jornada)
-
-    # Agrupar por monitor
+    # Calcular datos para cada monitor
     monitores_data = {}
-    for asistencia in asistencias_qs:
-        monitor_id = asistencia.usuario.id
-        if monitor_id not in monitores_data:
-            monitores_data[monitor_id] = {
-                'monitor': {
-                    'id': asistencia.usuario.id,
-                    'username': asistencia.usuario.username,
-                    'nombre': asistencia.usuario.nombre
-                },
-                'total_horas': 0.0,
-                'total_asistencias': 0,
-                'asistencias_presentes': 0,
-                'asistencias_autorizadas': 0,
-                'asistencias': []
-            }
+    total_horas_general = 0.0
+    total_asistencias_general = 0
+    total_ajustes_general = 0
+    
+    for monitor in monitores:
+        # Calcular horas totales incluyendo ajustes
+        calculo_horas = calcular_horas_totales_monitor(monitor.id, fecha_inicio, fecha_fin, sede, jornada)
         
-        monitores_data[monitor_id]['total_horas'] += float(asistencia.horas)
-        monitores_data[monitor_id]['total_asistencias'] += 1
-        if asistencia.presente:
-            monitores_data[monitor_id]['asistencias_presentes'] += 1
-        if asistencia.estado_autorizacion == 'autorizado':
-            monitores_data[monitor_id]['asistencias_autorizadas'] += 1
-        
-        monitores_data[monitor_id]['asistencias'].append(AsistenciaSerializer(asistencia).data)
+        # Solo incluir monitores que tienen datos en el período
+        if calculo_horas['total_asistencias'] > 0 or calculo_horas['total_ajustes'] > 0:
+            # Query asistencias para el detalle
+            asistencias_qs = Asistencia.objects.filter(
+                usuario=monitor,
+                fecha__gte=fecha_inicio,
+                fecha__lte=fecha_fin
+            ).select_related('horario')
 
-    # Calcular estadísticas generales
-    total_horas_general = sum(data['total_horas'] for data in monitores_data.values())
-    total_asistencias_general = sum(data['total_asistencias'] for data in monitores_data.values())
+            # Aplicar filtros a asistencias
+            if sede:
+                asistencias_qs = asistencias_qs.filter(horario__sede=sede)
+            if jornada:
+                asistencias_qs = asistencias_qs.filter(horario__jornada=jornada)
+
+            asistencias_presentes = asistencias_qs.filter(presente=True).count()
+            asistencias_autorizadas = asistencias_qs.filter(estado_autorizacion='autorizado').count()
+
+            # Query ajustes para el detalle
+            ajustes_qs = AjusteHoras.objects.filter(
+                usuario=monitor,
+                fecha__gte=fecha_inicio,
+                fecha__lte=fecha_fin
+            ).select_related('creado_por', 'asistencia')
+
+            monitores_data[monitor.id] = {
+                'monitor': {
+                    'id': monitor.id,
+                    'username': monitor.username,
+                    'nombre': monitor.nombre
+                },
+                'horas_asistencias': round(calculo_horas['horas_asistencias'], 2),
+                'horas_ajustes': round(calculo_horas['horas_ajustes'], 2),
+                'total_horas': round(calculo_horas['horas_totales'], 2),
+                'total_asistencias': calculo_horas['total_asistencias'],
+                'total_ajustes': calculo_horas['total_ajustes'],
+                'asistencias_presentes': asistencias_presentes,
+                'asistencias_autorizadas': asistencias_autorizadas,
+                'asistencias': [AsistenciaSerializer(a).data for a in asistencias_qs],
+                'ajustes': [AjusteHorasSerializer(aj).data for aj in ajustes_qs]
+            }
+            
+            # Acumular estadísticas generales
+            total_horas_general += calculo_horas['horas_totales']
+            total_asistencias_general += calculo_horas['total_asistencias']
+            total_ajustes_general += calculo_horas['total_ajustes']
+
     total_monitores = len(monitores_data)
 
     # Ordenar monitores por horas trabajadas (descendente)
@@ -871,6 +948,7 @@ def directivo_reporte_horas_todos(request):
         'estadisticas_generales': {
             'total_horas': round(total_horas_general, 2),
             'total_asistencias': total_asistencias_general,
+            'total_ajustes': total_ajustes_general,
             'total_monitores': total_monitores,
             'promedio_horas_por_monitor': round(total_horas_general / max(1, total_monitores), 2)
         },
@@ -963,3 +1041,140 @@ def monitor_marcar(request):
     asistencia.save()
 
     return Response(AsistenciaSerializer(asistencia).data)
+
+
+# ===== Endpoints para AJUSTES DE HORAS =====
+
+@api_view(['GET', 'POST'])
+@authentication_classes([])
+@permission_classes([AllowAny])
+def directivo_ajustes_horas(request):
+    """
+    GET: Listar ajustes de horas con filtros opcionales
+    POST: Crear nuevo ajuste de horas
+    Acceso: solo DIRECTIVO
+    """
+    # Autenticación manual
+    auth_header = request.headers.get('Authorization')
+    if not auth_header or not auth_header.startswith('Bearer '):
+        return Response({'detail': 'Token de autenticación requerido'}, status=status.HTTP_401_UNAUTHORIZED)
+
+    # Usuario DIRECTIVO temporal
+    usuario_directivo = UsuarioPersonalizado.objects.filter(tipo_usuario='DIRECTIVO').first()
+    if not usuario_directivo:
+        return Response({'detail': 'No hay usuarios DIRECTIVO'}, status=status.HTTP_403_FORBIDDEN)
+
+    if request.method == 'GET':
+        # Parámetros de filtrado
+        monitor_id = request.query_params.get('monitor_id')
+        fecha_inicio_str = request.query_params.get('fecha_inicio')
+        fecha_fin_str = request.query_params.get('fecha_fin')
+        
+        # Query base
+        ajustes_qs = AjusteHoras.objects.all().select_related('usuario', 'creado_por', 'asistencia')
+        
+        # Aplicar filtros
+        if monitor_id:
+            try:
+                monitor_id = int(monitor_id)
+                ajustes_qs = ajustes_qs.filter(usuario__id=monitor_id)
+            except ValueError:
+                return Response({'detail': 'monitor_id debe ser un número entero'}, status=status.HTTP_400_BAD_REQUEST)
+        
+        # Fechas por defecto: último mes
+        if not fecha_inicio_str:
+            from datetime import date, timedelta
+            fecha_inicio = date.today() - timedelta(days=30)
+        else:
+            fecha_inicio = _parse_fecha(fecha_inicio_str)
+        
+        if not fecha_fin_str:
+            fecha_fin = date.today()
+        else:
+            fecha_fin = _parse_fecha(fecha_fin_str)
+        
+        # Filtrar por rango de fechas
+        ajustes_qs = ajustes_qs.filter(fecha__gte=fecha_inicio, fecha__lte=fecha_fin)
+        
+        # Serializar y responder
+        serializer = AjusteHorasSerializer(ajustes_qs, many=True)
+        
+        # Calcular estadísticas
+        total_ajustes = ajustes_qs.count()
+        total_horas_ajustadas = sum(float(ajuste.cantidad_horas) for ajuste in ajustes_qs)
+        monitores_afectados = ajustes_qs.values('usuario').distinct().count()
+        
+        response_data = {
+            'periodo': {
+                'fecha_inicio': str(fecha_inicio),
+                'fecha_fin': str(fecha_fin)
+            },
+            'estadisticas': {
+                'total_ajustes': total_ajustes,
+                'total_horas_ajustadas': total_horas_ajustadas,
+                'monitores_afectados': monitores_afectados
+            },
+            'filtros_aplicados': {
+                'monitor_id': monitor_id
+            },
+            'ajustes': serializer.data
+        }
+        
+        return Response(response_data)
+    
+    elif request.method == 'POST':
+        serializer = AjusteHorasCreateSerializer(data=request.data)
+        if serializer.is_valid():
+            # Obtener instancias
+            monitor = UsuarioPersonalizado.objects.get(id=serializer.validated_data['monitor_id'])
+            asistencia = None
+            if serializer.validated_data.get('asistencia_id'):
+                asistencia = Asistencia.objects.get(id=serializer.validated_data['asistencia_id'])
+            
+            # Crear ajuste
+            ajuste = AjusteHoras.objects.create(
+                usuario=monitor,
+                fecha=serializer.validated_data['fecha'],
+                cantidad_horas=serializer.validated_data['cantidad_horas'],
+                motivo=serializer.validated_data['motivo'],
+                asistencia=asistencia,
+                creado_por=usuario_directivo
+            )
+            
+            return Response(AjusteHorasSerializer(ajuste).data, status=status.HTTP_201_CREATED)
+        else:
+            return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+
+@api_view(['GET', 'DELETE'])
+@authentication_classes([])
+@permission_classes([AllowAny])
+def directivo_ajuste_horas_detalle(request, pk):
+    """
+    GET: Obtener detalles de un ajuste específico
+    DELETE: Eliminar ajuste de horas
+    Acceso: solo DIRECTIVO
+    """
+    # Autenticación manual
+    auth_header = request.headers.get('Authorization')
+    if not auth_header or not auth_header.startswith('Bearer '):
+        return Response({'detail': 'Token de autenticación requerido'}, status=status.HTTP_401_UNAUTHORIZED)
+
+    # Usuario DIRECTIVO temporal
+    usuario_directivo = UsuarioPersonalizado.objects.filter(tipo_usuario='DIRECTIVO').first()
+    if not usuario_directivo:
+        return Response({'detail': 'No hay usuarios DIRECTIVO'}, status=status.HTTP_403_FORBIDDEN)
+
+    # Verificar que el ajuste existe
+    try:
+        ajuste = AjusteHoras.objects.select_related('usuario', 'creado_por', 'asistencia').get(id=pk)
+    except AjusteHoras.DoesNotExist:
+        return Response({'detail': 'Ajuste de horas no encontrado'}, status=status.HTTP_404_NOT_FOUND)
+
+    if request.method == 'GET':
+        serializer = AjusteHorasSerializer(ajuste)
+        return Response(serializer.data)
+    
+    elif request.method == 'DELETE':
+        ajuste.delete()
+        return Response({'detail': 'Ajuste de horas eliminado exitosamente'}, status=status.HTTP_204_NO_CONTENT)
