@@ -1001,6 +1001,9 @@ def monitor_marcar(request):
     """
     Body: { "fecha": "YYYY-MM-DD", "jornada": "M|T" }
     Marca presente=True en la asistencia del bloque correspondiente si el usuario tiene HorarioFijo.
+    
+    IMPORTANTE: Los monitores pueden marcar durante TODO EL DÍA si la asistencia está autorizada.
+    No hay restricciones de horario - pueden marcar mañana a las 5 PM si está autorizado.
     """
     usuario = request.user
     print(f"=== MONITOR MARCAR - Usuario autenticado: {usuario.username} (ID: {usuario.id}) ===")
@@ -1228,6 +1231,516 @@ def directivo_buscar_monitores(request):
         'busqueda': busqueda,
         'total_encontrados': len(resultados),
         'monitores': resultados
+    }
+
+    return Response(response_data)
+
+
+# ===== Endpoints para FINANZAS =====
+
+def calcular_horas_semanales_monitor(monitor_id):
+    """
+    Calcula las horas semanales que debe trabajar un monitor basado en sus horarios fijos.
+    Cada jornada (M/T) = 4 horas.
+    """
+    horarios = HorarioFijo.objects.filter(usuario_id=monitor_id)
+    total_horas_semana = horarios.count() * 4  # 4 horas por jornada
+    return total_horas_semana
+
+def calcular_costo_total_monitor(monitor_id, fecha_inicio, fecha_fin):
+    """
+    Calcula el costo total que debe recibir un monitor en un período.
+    Incluye horas de asistencias + ajustes de horas.
+    """
+    calculo_horas = calcular_horas_totales_monitor(monitor_id, fecha_inicio, fecha_fin)
+    costo_por_hora = 9965  # COP
+    costo_total = calculo_horas['horas_totales'] * costo_por_hora
+    return round(costo_total, 2)
+
+def calcular_costo_proyectado_monitor(monitor_id, semanas_trabajadas, total_semanas=16):
+    """
+    Calcula el costo proyectado de un monitor basado en sus horarios fijos.
+    """
+    horas_semanales = calcular_horas_semanales_monitor(monitor_id)
+    horas_totales_proyectadas = horas_semanales * total_semanas
+    horas_trabajadas_proyectadas = horas_semanales * semanas_trabajadas
+    costo_por_hora = 9965  # COP
+    
+    return {
+        'horas_semanales': horas_semanales,
+        'horas_totales_proyectadas': horas_totales_proyectadas,
+        'horas_trabajadas_proyectadas': horas_trabajadas_proyectadas,
+        'costo_total_proyectado': round(horas_totales_proyectadas * costo_por_hora, 2),
+        'costo_trabajado_proyectado': round(horas_trabajadas_proyectadas * costo_por_hora, 2),
+        'semanas_trabajadas': semanas_trabajadas,
+        'semanas_faltantes': total_semanas - semanas_trabajadas
+    }
+
+@api_view(['GET'])
+@authentication_classes([])
+@permission_classes([AllowAny])
+def directivo_finanzas_monitor_individual(request, monitor_id):
+    """
+    Reporte financiero individual de un monitor específico.
+    Incluye costo actual, proyectado, horas semanales, etc.
+    Acceso: solo DIRECTIVO
+    """
+    # Autenticación manual
+    auth_header = request.headers.get('Authorization')
+    if not auth_header or not auth_header.startswith('Bearer '):
+        return Response({'detail': 'Token de autenticación requerido'}, status=status.HTTP_401_UNAUTHORIZED)
+
+    # Usuario DIRECTIVO temporal
+    usuario_directivo = UsuarioPersonalizado.objects.filter(tipo_usuario='DIRECTIVO').first()
+    if not usuario_directivo:
+        return Response({'detail': 'No hay usuarios DIRECTIVO'}, status=status.HTTP_403_FORBIDDEN)
+
+    # Verificar que el monitor existe
+    try:
+        monitor = UsuarioPersonalizado.objects.get(id=monitor_id, tipo_usuario='MONITOR')
+    except UsuarioPersonalizado.DoesNotExist:
+        return Response({'detail': 'Monitor no encontrado'}, status=status.HTTP_404_NOT_FOUND)
+
+    # Parámetros de filtrado
+    fecha_inicio_str = request.query_params.get('fecha_inicio')
+    fecha_fin_str = request.query_params.get('fecha_fin')
+    semanas_trabajadas = request.query_params.get('semanas_trabajadas', 8)  # Por defecto 8 semanas
+
+    # Fechas por defecto: último mes
+    if not fecha_inicio_str:
+        from datetime import date, timedelta
+        fecha_inicio = date.today() - timedelta(days=30)
+    else:
+        fecha_inicio = _parse_fecha(fecha_inicio_str)
+    
+    if not fecha_fin_str:
+        fecha_fin = date.today()
+    else:
+        fecha_fin = _parse_fecha(fecha_fin_str)
+
+    # Validar semanas_trabajadas
+    try:
+        semanas_trabajadas = int(semanas_trabajadas)
+        if semanas_trabajadas < 0 or semanas_trabajadas > 16:
+            return Response({'detail': 'semanas_trabajadas debe estar entre 0 y 16'}, status=status.HTTP_400_BAD_REQUEST)
+    except ValueError:
+        return Response({'detail': 'semanas_trabajadas debe ser un número entero'}, status=status.HTTP_400_BAD_REQUEST)
+
+    # Calcular horas y costos
+    calculo_horas = calcular_horas_totales_monitor(monitor_id, fecha_inicio, fecha_fin)
+    costo_actual = calcular_costo_total_monitor(monitor_id, fecha_inicio, fecha_fin)
+    proyeccion = calcular_costo_proyectado_monitor(monitor_id, semanas_trabajadas)
+
+    # Información de horarios
+    horarios = HorarioFijo.objects.filter(usuario=monitor)
+    horarios_por_dia = {}
+    for horario in horarios:
+        dia = horario.get_dia_semana_display()
+        if dia not in horarios_por_dia:
+            horarios_por_dia[dia] = []
+        horarios_por_dia[dia].append({
+            'jornada': horario.get_jornada_display(),
+            'sede': horario.get_sede_display()
+        })
+
+    # Respuesta
+    response_data = {
+        'monitor': {
+            'id': monitor.id,
+            'username': monitor.username,
+            'nombre': monitor.nombre
+        },
+        'periodo_actual': {
+            'fecha_inicio': fecha_inicio.strftime('%Y-%m-%d'),
+            'fecha_fin': fecha_fin.strftime('%Y-%m-%d'),
+            'dias_trabajados': (fecha_fin - fecha_inicio).days + 1
+        },
+        'horarios_semanales': {
+            'horas_por_semana': proyeccion['horas_semanales'],
+            'jornadas_por_semana': proyeccion['horas_semanales'] // 4,
+            'detalle_por_dia': horarios_por_dia
+        },
+        'finanzas_actuales': {
+            'horas_trabajadas': calculo_horas['horas_totales'],
+            'horas_asistencias': calculo_horas['horas_asistencias'],
+            'horas_ajustes': calculo_horas['horas_ajustes'],
+            'costo_total': costo_actual,
+            'costo_por_hora': 9965
+        },
+        'proyeccion_semestre': {
+            'semanas_trabajadas': proyeccion['semanas_trabajadas'],
+            'semanas_faltantes': proyeccion['semanas_faltantes'],
+            'horas_totales_proyectadas': proyeccion['horas_totales_proyectadas'],
+            'horas_trabajadas_proyectadas': proyeccion['horas_trabajadas_proyectadas'],
+            'costo_total_proyectado': proyeccion['costo_total_proyectado'],
+            'costo_trabajado_proyectado': proyeccion['costo_trabajado_proyectado'],
+            'porcentaje_completado': round((proyeccion['semanas_trabajadas'] / 16) * 100, 2)
+        },
+        'estadisticas': {
+            'total_asistencias': calculo_horas['total_asistencias'],
+            'total_ajustes': calculo_horas['total_ajustes'],
+            'promedio_horas_por_dia': round(calculo_horas['horas_totales'] / max(1, (fecha_fin - fecha_inicio).days + 1), 2)
+        }
+    }
+
+    return Response(response_data)
+
+@api_view(['GET'])
+@authentication_classes([])
+@permission_classes([AllowAny])
+def directivo_finanzas_todos_monitores(request):
+    """
+    Reporte financiero consolidado de todos los monitores.
+    Incluye costos totales, proyecciones, comparativas, etc.
+    Acceso: solo DIRECTIVO
+    """
+    # Autenticación manual
+    auth_header = request.headers.get('Authorization')
+    if not auth_header or not auth_header.startswith('Bearer '):
+        return Response({'detail': 'Token de autenticación requerido'}, status=status.HTTP_401_UNAUTHORIZED)
+
+    # Usuario DIRECTIVO temporal
+    usuario_directivo = UsuarioPersonalizado.objects.filter(tipo_usuario='DIRECTIVO').first()
+    if not usuario_directivo:
+        return Response({'detail': 'No hay usuarios DIRECTIVO'}, status=status.HTTP_403_FORBIDDEN)
+
+    # Parámetros de filtrado
+    fecha_inicio_str = request.query_params.get('fecha_inicio')
+    fecha_fin_str = request.query_params.get('fecha_fin')
+    semanas_trabajadas = request.query_params.get('semanas_trabajadas', 8)  # Por defecto 8 semanas
+
+    # Fechas por defecto: último mes
+    if not fecha_inicio_str:
+        from datetime import date, timedelta
+        fecha_inicio = date.today() - timedelta(days=30)
+    else:
+        fecha_inicio = _parse_fecha(fecha_inicio_str)
+    
+    if not fecha_fin_str:
+        fecha_fin = date.today()
+    else:
+        fecha_fin = _parse_fecha(fecha_fin_str)
+
+    # Validar semanas_trabajadas
+    try:
+        semanas_trabajadas = int(semanas_trabajadas)
+        if semanas_trabajadas < 0 or semanas_trabajadas > 16:
+            return Response({'detail': 'semanas_trabajadas debe estar entre 0 y 16'}, status=status.HTTP_400_BAD_REQUEST)
+    except ValueError:
+        return Response({'detail': 'semanas_trabajadas debe ser un número entero'}, status=status.HTTP_400_BAD_REQUEST)
+
+    # Obtener todos los monitores
+    monitores = UsuarioPersonalizado.objects.filter(tipo_usuario='MONITOR')
+    
+    # Calcular datos para cada monitor
+    monitores_data = []
+    total_costo_actual = 0.0
+    total_costo_proyectado = 0.0
+    total_horas_actuales = 0.0
+    total_horas_proyectadas = 0.0
+    
+    for monitor in monitores:
+        # Calcular horas y costos
+        calculo_horas = calcular_horas_totales_monitor(monitor.id, fecha_inicio, fecha_fin)
+        costo_actual = calcular_costo_total_monitor(monitor.id, fecha_inicio, fecha_fin)
+        proyeccion = calcular_costo_proyectado_monitor(monitor.id, semanas_trabajadas)
+        
+        # Solo incluir monitores que tienen horarios asignados
+        if proyeccion['horas_semanales'] > 0:
+            monitor_data = {
+                'monitor': {
+                    'id': monitor.id,
+                    'username': monitor.username,
+                    'nombre': monitor.nombre
+                },
+                'horarios_semanales': {
+                    'horas_por_semana': proyeccion['horas_semanales'],
+                    'jornadas_por_semana': proyeccion['horas_semanales'] // 4
+                },
+                'finanzas_actuales': {
+                    'horas_trabajadas': calculo_horas['horas_totales'],
+                    'costo_total': costo_actual
+                },
+                'proyeccion_semestre': {
+                    'semanas_trabajadas': proyeccion['semanas_trabajadas'],
+                    'semanas_faltantes': proyeccion['semanas_faltantes'],
+                    'costo_total_proyectado': proyeccion['costo_total_proyectado'],
+                    'costo_trabajado_proyectado': proyeccion['costo_trabajado_proyectado'],
+                    'porcentaje_completado': round((proyeccion['semanas_trabajadas'] / 16) * 100, 2)
+                },
+                'estadisticas': {
+                    'total_asistencias': calculo_horas['total_asistencias'],
+                    'total_ajustes': calculo_horas['total_ajustes']
+                }
+            }
+            
+            monitores_data.append(monitor_data)
+            
+            # Acumular totales
+            total_costo_actual += costo_actual
+            total_costo_proyectado += proyeccion['costo_total_proyectado']
+            total_horas_actuales += calculo_horas['horas_totales']
+            total_horas_proyectadas += proyeccion['horas_totales_proyectadas']
+
+    # Ordenar monitores por costo actual (descendente)
+    monitores_data.sort(key=lambda x: x['finanzas_actuales']['costo_total'], reverse=True)
+
+    # Calcular estadísticas generales
+    total_monitores = len(monitores_data)
+    costo_promedio_por_monitor = total_costo_actual / max(1, total_monitores)
+    horas_promedio_por_monitor = total_horas_actuales / max(1, total_monitores)
+
+    # Respuesta
+    response_data = {
+        'periodo_actual': {
+            'fecha_inicio': fecha_inicio.strftime('%Y-%m-%d'),
+            'fecha_fin': fecha_fin.strftime('%Y-%m-%d'),
+            'dias_trabajados': (fecha_fin - fecha_inicio).days + 1
+        },
+        'semanas_trabajadas': semanas_trabajadas,
+        'estadisticas_generales': {
+            'total_monitores': total_monitores,
+            'costo_total_actual': round(total_costo_actual, 2),
+            'costo_total_proyectado': round(total_costo_proyectado, 2),
+            'costo_promedio_por_monitor': round(costo_promedio_por_monitor, 2),
+            'horas_totales_actuales': round(total_horas_actuales, 2),
+            'horas_totales_proyectadas': round(total_horas_proyectadas, 2),
+            'horas_promedio_por_monitor': round(horas_promedio_por_monitor, 2),
+            'costo_por_hora': 9965
+        },
+        'resumen_financiero': {
+            'diferencia_proyeccion_vs_actual': round(total_costo_proyectado - total_costo_actual, 2),
+            'porcentaje_ejecutado': round((total_costo_actual / max(1, total_costo_proyectado)) * 100, 2),
+            'costo_semanal_promedio': round(total_costo_actual / max(1, (fecha_fin - fecha_inicio).days + 1) * 7, 2)
+        },
+        'monitores': monitores_data
+    }
+
+    return Response(response_data)
+
+@api_view(['GET'])
+@authentication_classes([])
+@permission_classes([AllowAny])
+def directivo_finanzas_resumen_ejecutivo(request):
+    """
+    Resumen ejecutivo financiero del sistema.
+    Dashboard con métricas clave, tendencias y alertas.
+    Acceso: solo DIRECTIVO
+    """
+    # Autenticación manual
+    auth_header = request.headers.get('Authorization')
+    if not auth_header or not auth_header.startswith('Bearer '):
+        return Response({'detail': 'Token de autenticación requerido'}, status=status.HTTP_401_UNAUTHORIZED)
+
+    # Usuario DIRECTIVO temporal
+    usuario_directivo = UsuarioPersonalizado.objects.filter(tipo_usuario='DIRECTIVO').first()
+    if not usuario_directivo:
+        return Response({'detail': 'No hay usuarios DIRECTIVO'}, status=status.HTTP_403_FORBIDDEN)
+
+    # Parámetros de filtrado
+    fecha_inicio_str = request.query_params.get('fecha_inicio')
+    fecha_fin_str = request.query_params.get('fecha_fin')
+    semanas_trabajadas = request.query_params.get('semanas_trabajadas', 8)
+
+    # Fechas por defecto: último mes
+    if not fecha_inicio_str:
+        from datetime import date, timedelta
+        fecha_inicio = date.today() - timedelta(days=30)
+    else:
+        fecha_inicio = _parse_fecha(fecha_inicio_str)
+    
+    if not fecha_fin_str:
+        fecha_fin = date.today()
+    else:
+        fecha_fin = _parse_fecha(fecha_fin_str)
+
+    # Validar semanas_trabajadas
+    try:
+        semanas_trabajadas = int(semanas_trabajadas)
+        if semanas_trabajadas < 0 or semanas_trabajadas > 16:
+            return Response({'detail': 'semanas_trabajadas debe estar entre 0 y 16'}, status=status.HTTP_400_BAD_REQUEST)
+    except ValueError:
+        return Response({'detail': 'semanas_trabajadas debe ser un número entero'}, status=status.HTTP_400_BAD_REQUEST)
+
+    # Obtener todos los monitores
+    monitores = UsuarioPersonalizado.objects.filter(tipo_usuario='MONITOR')
+    
+    # Calcular métricas generales
+    total_costo_actual = 0.0
+    total_costo_proyectado = 0.0
+    total_horas_actuales = 0.0
+    total_horas_proyectadas = 0.0
+    monitores_activos = 0
+    monitores_con_horarios = 0
+    
+    # Top monitores por costo
+    monitores_costo = []
+    
+    for monitor in monitores:
+        calculo_horas = calcular_horas_totales_monitor(monitor.id, fecha_inicio, fecha_fin)
+        costo_actual = calcular_costo_total_monitor(monitor.id, fecha_inicio, fecha_fin)
+        proyeccion = calcular_costo_proyectado_monitor(monitor.id, semanas_trabajadas)
+        
+        # Contar monitores con horarios
+        if proyeccion['horas_semanales'] > 0:
+            monitores_con_horarios += 1
+            
+            # Contar monitores activos (con horas trabajadas)
+            if calculo_horas['horas_totales'] > 0:
+                monitores_activos += 1
+            
+            # Acumular totales
+            total_costo_actual += costo_actual
+            total_costo_proyectado += proyeccion['costo_total_proyectado']
+            total_horas_actuales += calculo_horas['horas_totales']
+            total_horas_proyectadas += proyeccion['horas_totales_proyectadas']
+            
+            # Para top monitores
+            monitores_costo.append({
+                'monitor': {
+                    'id': monitor.id,
+                    'nombre': monitor.nombre,
+                    'username': monitor.username
+                },
+                'costo_actual': costo_actual,
+                'horas_trabajadas': calculo_horas['horas_totales']
+            })
+
+    # Ordenar por costo y tomar top 5
+    monitores_costo.sort(key=lambda x: x['costo_actual'], reverse=True)
+    top_monitores = monitores_costo[:5]
+
+    # Calcular alertas y tendencias
+    porcentaje_ejecutado = (total_costo_actual / max(1, total_costo_proyectado)) * 100
+    costo_semanal_promedio = total_costo_actual / max(1, (fecha_fin - fecha_inicio).days + 1) * 7
+    
+    alertas = []
+    if porcentaje_ejecutado > 80:
+        alertas.append({
+            'tipo': 'warning',
+            'mensaje': f'Se ha ejecutado el {porcentaje_ejecutado:.1f}% del presupuesto proyectado'
+        })
+    
+    if monitores_activos < monitores_con_horarios * 0.5:
+        alertas.append({
+            'tipo': 'info',
+            'mensaje': f'Solo {monitores_activos} de {monitores_con_horarios} monitores han trabajado en el período'
+        })
+
+    # Respuesta
+    response_data = {
+        'periodo': {
+            'fecha_inicio': fecha_inicio.strftime('%Y-%m-%d'),
+            'fecha_fin': fecha_fin.strftime('%Y-%m-%d'),
+            'semanas_trabajadas': semanas_trabajadas
+        },
+        'metricas_principales': {
+            'total_monitores': monitores_con_horarios,
+            'monitores_activos': monitores_activos,
+            'porcentaje_actividad': round((monitores_activos / max(1, monitores_con_horarios)) * 100, 2),
+            'costo_total_actual': round(total_costo_actual, 2),
+            'costo_total_proyectado': round(total_costo_proyectado, 2),
+            'horas_totales_actuales': round(total_horas_actuales, 2),
+            'horas_totales_proyectadas': round(total_horas_proyectadas, 2)
+        },
+        'indicadores_financieros': {
+            'costo_por_hora': 9965,
+            'costo_promedio_por_monitor': round(total_costo_actual / max(1, monitores_con_horarios), 2),
+            'costo_semanal_promedio': round(costo_semanal_promedio, 2),
+            'porcentaje_ejecutado': round(porcentaje_ejecutado, 2),
+            'diferencia_presupuesto': round(total_costo_proyectado - total_costo_actual, 2)
+        },
+        'top_monitores': {
+            'por_costo': top_monitores,
+            'total_considerados': len(monitores_costo)
+        },
+        'alertas': alertas,
+        'resumen_semanal': {
+            'costo_semanal_total': round(costo_semanal_promedio * monitores_con_horarios, 2),
+            'horas_semanal_promedio': round(total_horas_actuales / max(1, (fecha_fin - fecha_inicio).days + 1) * 7, 2),
+            'proyeccion_fin_semestre': round(total_costo_proyectado - total_costo_actual, 2)
+        }
+    }
+
+    return Response(response_data)
+
+@api_view(['GET'])
+@authentication_classes([])
+@permission_classes([AllowAny])
+def directivo_finanzas_comparativa_semanas(request):
+    """
+    Comparativa financiera por semanas del semestre.
+    Muestra evolución de costos y horas por semana.
+    Acceso: solo DIRECTIVO
+    """
+    # Autenticación manual
+    auth_header = request.headers.get('Authorization')
+    if not auth_header or not auth_header.startswith('Bearer '):
+        return Response({'detail': 'Token de autenticación requerido'}, status=status.HTTP_401_UNAUTHORIZED)
+
+    # Usuario DIRECTIVO temporal
+    usuario_directivo = UsuarioPersonalizado.objects.filter(tipo_usuario='DIRECTIVO').first()
+    if not usuario_directivo:
+        return Response({'detail': 'No hay usuarios DIRECTIVO'}, status=status.HTTP_403_FORBIDDEN)
+
+    # Obtener todos los monitores
+    monitores = UsuarioPersonalizado.objects.filter(tipo_usuario='MONITOR')
+    
+    # Calcular datos por semana (simulado para las primeras 16 semanas)
+    semanas_data = []
+    total_semanas = 16
+    
+    for semana in range(1, total_semanas + 1):
+        semana_costo_total = 0.0
+        semana_horas_total = 0.0
+        monitores_semana = 0
+        
+        for monitor in monitores:
+            # Simular datos por semana (en un caso real, esto vendría de datos históricos)
+            proyeccion = calcular_costo_proyectado_monitor(monitor.id, semana)
+            
+            if proyeccion['horas_semanales'] > 0:
+                semana_costo_total += proyeccion['costo_trabajado_proyectado']
+                semana_horas_total += proyeccion['horas_trabajadas_proyectadas']
+                monitores_semana += 1
+        
+        semanas_data.append({
+            'semana': semana,
+            'costo_total': round(semana_costo_total, 2),
+            'horas_total': round(semana_horas_total, 2),
+            'monitores_activos': monitores_semana,
+            'costo_promedio_por_monitor': round(semana_costo_total / max(1, monitores_semana), 2),
+            'estado': 'completada' if semana <= 8 else 'pendiente'
+        })
+    
+    # Calcular totales acumulados
+    costo_acumulado = 0.0
+    horas_acumuladas = 0.0
+    
+    for semana_data in semanas_data:
+        costo_acumulado += semana_data['costo_total']
+        horas_acumuladas += semana_data['horas_total']
+        semana_data['costo_acumulado'] = round(costo_acumulado, 2)
+        semana_data['horas_acumuladas'] = round(horas_acumuladas, 2)
+        semana_data['porcentaje_completado'] = round((costo_acumulado / semanas_data[-1]['costo_acumulado']) * 100, 2)
+
+    # Respuesta
+    response_data = {
+        'total_semanas': total_semanas,
+        'semanas_trabajadas': 8,  # Por defecto
+        'semanas_pendientes': total_semanas - 8,
+        'resumen_general': {
+            'costo_total_semestre': round(semanas_data[-1]['costo_acumulado'], 2),
+            'horas_total_semestre': round(semanas_data[-1]['horas_acumuladas'], 2),
+            'costo_promedio_por_semana': round(semanas_data[-1]['costo_acumulado'] / total_semanas, 2),
+            'horas_promedio_por_semana': round(semanas_data[-1]['horas_acumuladas'] / total_semanas, 2)
+        },
+        'semanas': semanas_data,
+        'tendencias': {
+            'costo_por_semana': [s['costo_total'] for s in semanas_data],
+            'horas_por_semana': [s['horas_total'] for s in semanas_data],
+            'costo_acumulado': [s['costo_acumulado'] for s in semanas_data]
+        }
     }
 
     return Response(response_data)

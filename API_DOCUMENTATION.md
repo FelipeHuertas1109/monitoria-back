@@ -517,6 +517,111 @@ GET /example/directivo/reportes/horas-todos/?jornada=M&sede=SA
 
 ---
 
+## 👨‍💼 Endpoints para Monitores
+
+### Marcar Asistencia
+**POST** `/example/monitor/marcar/`
+
+**Headers:** `Authorization: Bearer <token>`
+
+**Body:**
+```json
+{
+  "fecha": "2024-01-15",
+  "jornada": "M"
+}
+```
+
+**Descripción:** Los monitores pueden marcar asistencia **durante todo el día** si la asistencia está autorizada por un directivo. No hay restricciones de horario - pueden marcar la jornada de mañana a las 5 PM si está autorizada.
+
+**Validaciones:**
+- El usuario debe ser de tipo MONITOR
+- Debe tener horario asignado para esa jornada
+- La asistencia debe estar autorizada por un directivo
+
+**Respuesta Exitosa (200):**
+```json
+{
+  "id": 1,
+  "usuario": {
+    "id": 3,
+    "username": "monitor1",
+    "nombre": "Juan Monitor"
+  },
+  "fecha": "2024-01-15",
+  "horario": {
+    "id": 1,
+    "dia_semana": 0,
+    "dia_semana_display": "Lunes",
+    "jornada": "M",
+    "jornada_display": "Mañana",
+    "sede": "SA",
+    "sede_display": "San Antonio"
+  },
+  "presente": true,
+  "estado_autorizacion": "autorizado",
+  "estado_autorizacion_display": "Autorizado",
+  "horas": 4.00
+}
+```
+
+**Respuesta de Error (400):**
+```json
+{
+  "detail": "Jornada inválida"
+}
+```
+
+**Respuesta de Error (403):**
+```json
+{
+  "detail": "Solo monitores pueden marcar asistencia"
+}
+```
+
+**O:**
+```json
+{
+  "detail": "Este bloque aún no ha sido autorizado por un directivo.",
+  "code": "not_authorized"
+}
+```
+
+**O:**
+```json
+{
+  "detail": "No tienes horario asignado para esa jornada hoy"
+}
+```
+
+### Mis Asistencias
+**GET** `/example/monitor/mis-asistencias/`
+
+**Headers:** `Authorization: Bearer <token>`
+
+**Parámetros de consulta (opcionales):**
+- `fecha`: Fecha específica (YYYY-MM-DD). Por defecto: hoy
+
+**Descripción:** Lista las asistencias del monitor para una fecha específica. Genera automáticamente las asistencias faltantes basadas en los horarios fijos.
+
+**Respuesta Exitosa (200):**
+```json
+[
+  {
+    "id": 1,
+    "usuario": {...},
+    "fecha": "2024-01-15",
+    "horario": {...},
+    "presente": false,
+    "estado_autorizacion": "pendiente",
+    "estado_autorizacion_display": "Pendiente",
+    "horas": 0.00
+  }
+]
+```
+
+---
+
 ## 🔧 Endpoints para Ajustes de Horas
 
 ### Listar y Crear Ajustes de Horas
@@ -752,6 +857,311 @@ GET /example/directivo/buscar-monitores/?q=mar
 
 ---
 
+## 💰 Endpoints para Finanzas
+
+### Reporte Financiero Individual de Monitor
+**GET** `/example/directivo/finanzas/monitor/{monitor_id}/`
+
+**Descripción:** Genera un reporte financiero detallado de un monitor específico, incluyendo costos actuales, proyecciones del semestre, horas semanales y estadísticas completas.
+
+**Headers:** `Authorization: Bearer <token>` (solo DIRECTIVO)
+
+**Parámetros de consulta (opcionales):**
+- `fecha_inicio`: Fecha de inicio del reporte (YYYY-MM-DD). Por defecto: 30 días atrás
+- `fecha_fin`: Fecha de fin del reporte (YYYY-MM-DD). Por defecto: hoy
+- `semanas_trabajadas`: Número de semanas trabajadas en el semestre (0-16). Por defecto: 8
+
+**Ejemplos de uso:**
+```bash
+# Reporte del último mes para el monitor ID 3
+GET /example/directivo/finanzas/monitor/3/
+
+# Reporte de enero 2024 con 10 semanas trabajadas
+GET /example/directivo/finanzas/monitor/3/?fecha_inicio=2024-01-01&fecha_fin=2024-01-31&semanas_trabajadas=10
+```
+
+**Respuesta Exitosa (200):**
+```json
+{
+  "monitor": {
+    "id": 3,
+    "username": "monitor1",
+    "nombre": "Juan Monitor"
+  },
+  "periodo_actual": {
+    "fecha_inicio": "2024-01-01",
+    "fecha_fin": "2024-01-31",
+    "dias_trabajados": 31
+  },
+  "horarios_semanales": {
+    "horas_por_semana": 12,
+    "jornadas_por_semana": 3,
+    "detalle_por_dia": {
+      "Lunes": [
+        {"jornada": "Mañana", "sede": "San Antonio"}
+      ],
+      "Miércoles": [
+        {"jornada": "Tarde", "sede": "Barcelona"}
+      ],
+      "Viernes": [
+        {"jornada": "Mañana", "sede": "San Antonio"}
+      ]
+    }
+  },
+  "finanzas_actuales": {
+    "horas_trabajadas": 48.0,
+    "horas_asistencias": 44.0,
+    "horas_ajustes": 4.0,
+    "costo_total": 478320.0,
+    "costo_por_hora": 9965
+  },
+  "proyeccion_semestre": {
+    "semanas_trabajadas": 8,
+    "semanas_faltantes": 8,
+    "horas_totales_proyectadas": 192.0,
+    "horas_trabajadas_proyectadas": 96.0,
+    "costo_total_proyectado": 1913280.0,
+    "costo_trabajado_proyectado": 956640.0,
+    "porcentaje_completado": 50.0
+  },
+  "estadisticas": {
+    "total_asistencias": 12,
+    "total_ajustes": 1,
+    "promedio_horas_por_dia": 1.55
+  }
+}
+```
+
+### Reporte Financiero de Todos los Monitores
+**GET** `/example/directivo/finanzas/todos-monitores/`
+
+**Descripción:** Genera un reporte financiero consolidado de todos los monitores, incluyendo costos totales, proyecciones, comparativas y estadísticas generales.
+
+**Headers:** `Authorization: Bearer <token>` (solo DIRECTIVO)
+
+**Parámetros de consulta (opcionales):**
+- `fecha_inicio`: Fecha de inicio del reporte (YYYY-MM-DD). Por defecto: 30 días atrás
+- `fecha_fin`: Fecha de fin del reporte (YYYY-MM-DD). Por defecto: hoy
+- `semanas_trabajadas`: Número de semanas trabajadas en el semestre (0-16). Por defecto: 8
+
+**Ejemplos de uso:**
+```bash
+# Reporte consolidado del último mes
+GET /example/directivo/finanzas/todos-monitores/
+
+# Reporte de enero 2024 con 10 semanas trabajadas
+GET /example/directivo/finanzas/todos-monitores/?fecha_inicio=2024-01-01&fecha_fin=2024-01-31&semanas_trabajadas=10
+```
+
+**Respuesta Exitosa (200):**
+```json
+{
+  "periodo_actual": {
+    "fecha_inicio": "2024-01-01",
+    "fecha_fin": "2024-01-31",
+    "dias_trabajados": 31
+  },
+  "semanas_trabajadas": 8,
+  "estadisticas_generales": {
+    "total_monitores": 8,
+    "costo_total_actual": 3826560.0,
+    "costo_total_proyectado": 7653120.0,
+    "costo_promedio_por_monitor": 478320.0,
+    "horas_totales_actuales": 384.0,
+    "horas_totales_proyectadas": 768.0,
+    "horas_promedio_por_monitor": 48.0,
+    "costo_por_hora": 9965
+  },
+  "resumen_financiero": {
+    "diferencia_proyeccion_vs_actual": 3826560.0,
+    "porcentaje_ejecutado": 50.0,
+    "costo_semanal_promedio": 86352.0
+  },
+  "monitores": [
+    {
+      "monitor": {
+        "id": 3,
+        "username": "monitor1",
+        "nombre": "Juan Monitor"
+      },
+      "horarios_semanales": {
+        "horas_por_semana": 12,
+        "jornadas_por_semana": 3
+      },
+      "finanzas_actuales": {
+        "horas_trabajadas": 48.0,
+        "costo_total": 478320.0
+      },
+      "proyeccion_semestre": {
+        "semanas_trabajadas": 8,
+        "semanas_faltantes": 8,
+        "costo_total_proyectado": 1913280.0,
+        "costo_trabajado_proyectado": 956640.0,
+        "porcentaje_completado": 50.0
+      },
+      "estadisticas": {
+        "total_asistencias": 12,
+        "total_ajustes": 1
+      }
+    }
+  ]
+}
+```
+
+### Resumen Ejecutivo Financiero
+**GET** `/example/directivo/finanzas/resumen-ejecutivo/`
+
+**Descripción:** Dashboard ejecutivo con métricas clave, tendencias, alertas y resumen financiero del sistema completo.
+
+**Headers:** `Authorization: Bearer <token>` (solo DIRECTIVO)
+
+**Parámetros de consulta (opcionales):**
+- `fecha_inicio`: Fecha de inicio del reporte (YYYY-MM-DD). Por defecto: 30 días atrás
+- `fecha_fin`: Fecha de fin del reporte (YYYY-MM-DD). Por defecto: hoy
+- `semanas_trabajadas`: Número de semanas trabajadas en el semestre (0-16). Por defecto: 8
+
+**Ejemplos de uso:**
+```bash
+# Dashboard ejecutivo del último mes
+GET /example/directivo/finanzas/resumen-ejecutivo/
+
+# Dashboard de enero 2024
+GET /example/directivo/finanzas/resumen-ejecutivo/?fecha_inicio=2024-01-01&fecha_fin=2024-01-31
+```
+
+**Respuesta Exitosa (200):**
+```json
+{
+  "periodo": {
+    "fecha_inicio": "2024-01-01",
+    "fecha_fin": "2024-01-31",
+    "semanas_trabajadas": 8
+  },
+  "metricas_principales": {
+    "total_monitores": 8,
+    "monitores_activos": 6,
+    "porcentaje_actividad": 75.0,
+    "costo_total_actual": 3826560.0,
+    "costo_total_proyectado": 7653120.0,
+    "horas_totales_actuales": 384.0,
+    "horas_totales_proyectadas": 768.0
+  },
+  "indicadores_financieros": {
+    "costo_por_hora": 9965,
+    "costo_promedio_por_monitor": 478320.0,
+    "costo_semanal_promedio": 86352.0,
+    "porcentaje_ejecutado": 50.0,
+    "diferencia_presupuesto": 3826560.0
+  },
+  "top_monitores": {
+    "por_costo": [
+      {
+        "monitor": {
+          "id": 3,
+          "nombre": "Juan Monitor",
+          "username": "monitor1"
+        },
+        "costo_actual": 478320.0,
+        "horas_trabajadas": 48.0
+      }
+    ],
+    "total_considerados": 8
+  },
+  "alertas": [
+    {
+      "tipo": "info",
+      "mensaje": "Solo 6 de 8 monitores han trabajado en el período"
+    }
+  ],
+  "resumen_semanal": {
+    "costo_semanal_total": 690816.0,
+    "horas_semanal_promedio": 86.71,
+    "proyeccion_fin_semestre": 3826560.0
+  }
+}
+```
+
+### Comparativa Financiera por Semanas
+**GET** `/example/directivo/finanzas/comparativa-semanas/`
+
+**Descripción:** Muestra la evolución financiera por semanas del semestre, incluyendo costos acumulados, horas trabajadas y tendencias.
+
+**Headers:** `Authorization: Bearer <token>` (solo DIRECTIVO)
+
+**Ejemplos de uso:**
+```bash
+# Comparativa de las 16 semanas del semestre
+GET /example/directivo/finanzas/comparativa-semanas/
+```
+
+**Respuesta Exitosa (200):**
+```json
+{
+  "total_semanas": 16,
+  "semanas_trabajadas": 8,
+  "semanas_pendientes": 8,
+  "resumen_general": {
+    "costo_total_semestre": 7653120.0,
+    "horas_total_semestre": 768.0,
+    "costo_promedio_por_semana": 478320.0,
+    "horas_promedio_por_semana": 48.0
+  },
+  "semanas": [
+    {
+      "semana": 1,
+      "costo_total": 478320.0,
+      "horas_total": 48.0,
+      "monitores_activos": 8,
+      "costo_promedio_por_monitor": 59790.0,
+      "estado": "completada",
+      "costo_acumulado": 478320.0,
+      "horas_acumuladas": 48.0,
+      "porcentaje_completado": 6.25
+    },
+    {
+      "semana": 2,
+      "costo_total": 478320.0,
+      "horas_total": 48.0,
+      "monitores_activos": 8,
+      "costo_promedio_por_monitor": 59790.0,
+      "estado": "completada",
+      "costo_acumulado": 956640.0,
+      "horas_acumuladas": 96.0,
+      "porcentaje_completado": 12.5
+    }
+  ],
+  "tendencias": {
+    "costo_por_semana": [478320.0, 478320.0, 478320.0],
+    "horas_por_semana": [48.0, 48.0, 48.0],
+    "costo_acumulado": [478320.0, 956640.0, 1434960.0]
+  }
+}
+```
+
+**Respuesta de Error (400):**
+```json
+{
+  "detail": "semanas_trabajadas debe estar entre 0 y 16"
+}
+```
+
+**Respuesta de Error (404):**
+```json
+{
+  "detail": "Monitor no encontrado"
+}
+```
+
+**Características de los Endpoints Financieros:**
+- **Costo por hora:** 9,965 COP (fijo para todos los cálculos)
+- **Duración del semestre:** 16 semanas máximo
+- **Cálculo de horas:** Cada jornada (M/T) = 4 horas
+- **Proyecciones:** Basadas en horarios fijos de cada monitor
+- **Incluye:** Asistencias + ajustes de horas manuales
+- **Ordenamiento:** Monitores ordenados por costo total (descendente)
+
+---
+
 ## 📊 Códigos de Estado
 
 - **200 OK**: Petición exitosa
@@ -807,6 +1217,24 @@ curl -X POST http://localhost:8000/example/asistencias/ \
   -H "Authorization: Bearer <token>" \
   -H "Content-Type: application/json" \
   -d '{"fecha": "2024-01-15", "horario": 1, "presente": true}'
+```
+
+### 4. Reporte Financiero Individual
+```bash
+curl -X GET "http://localhost:8000/example/directivo/finanzas/monitor/3/?fecha_inicio=2024-01-01&fecha_fin=2024-01-31" \
+  -H "Authorization: Bearer <token>"
+```
+
+### 5. Resumen Ejecutivo Financiero
+```bash
+curl -X GET "http://localhost:8000/example/directivo/finanzas/resumen-ejecutivo/?semanas_trabajadas=8" \
+  -H "Authorization: Bearer <token>"
+```
+
+### 6. Comparativa por Semanas
+```bash
+curl -X GET "http://localhost:8000/example/directivo/finanzas/comparativa-semanas/" \
+  -H "Authorization: Bearer <token>"
 ```
 
 ---

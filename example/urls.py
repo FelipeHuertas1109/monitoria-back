@@ -37,4 +37,10 @@ urlpatterns = [
     
     # Búsqueda de Monitores
     path('directivo/buscar-monitores/', views.directivo_buscar_monitores, name='directivo_buscar_monitores'),
+    
+    # Finanzas
+    path('directivo/finanzas/monitor/<int:monitor_id>/', views.directivo_finanzas_monitor_individual, name='directivo_finanzas_monitor_individual'),
+    path('directivo/finanzas/todos-monitores/', views.directivo_finanzas_todos_monitores, name='directivo_finanzas_todos_monitores'),
+    path('directivo/finanzas/resumen-ejecutivo/', views.directivo_finanzas_resumen_ejecutivo, name='directivo_finanzas_resumen_ejecutivo'),
+    path('directivo/finanzas/comparativa-semanas/', views.directivo_finanzas_comparativa_semanas, name='directivo_finanzas_comparativa_semanas'),
 ]
