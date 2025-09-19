@@ -1003,8 +1003,12 @@ def monitor_marcar(request):
     Body: { "fecha": "YYYY-MM-DD", "jornada": "M|T" }
     Marca presente=True en la asistencia del bloque correspondiente si el usuario tiene HorarioFijo.
     
-    IMPORTANTE: Los monitores pueden marcar durante TODO EL DÍA si la asistencia está autorizada.
-    No hay restricciones de horario - pueden marcar mañana a las 5 PM si está autorizado.
+    REGLAS DE MARCADO:
+    - Los monitores pueden marcar CUALQUIER JORNADA durante TODO EL DÍA si está autorizada
+    - Pueden marcar asistencia de MAÑANA en la TARDE y viceversa
+    - Solo importa que sea el mismo día y que esté autorizada por un directivo
+    - No hay restricciones de horario - pueden marcar a cualquier hora del día
+    - No se puede marcar fechas futuras
     """
     usuario = request.user
     print(f"=== MONITOR MARCAR - Usuario autenticado: {usuario.username} (ID: {usuario.id}) ===")
@@ -1014,16 +1018,25 @@ def monitor_marcar(request):
 
     fecha_obj = _parse_fecha(request.data.get('fecha'))
     jornada = request.data.get('jornada')
+    
+    # Validar jornada
     if jornada not in ['M', 'T']:
-        return Response({'detail': 'Jornada inválida'}, status=status.HTTP_400_BAD_REQUEST)
+        return Response({'detail': 'Jornada inválida. Debe ser M (Mañana) o T (Tarde)'}, status=status.HTTP_400_BAD_REQUEST)
 
+    # Validar que no sea fecha futura
+    from datetime import date
+    if fecha_obj > date.today():
+        return Response({'detail': 'No puedes marcar asistencia para fechas futuras'}, status=status.HTTP_400_BAD_REQUEST)
+
+    # Buscar el horario fijo del usuario para ese día y jornada
     dia_semana = _dia_semana_de_fecha(fecha_obj)
     try:
         horario = HorarioFijo.objects.get(usuario=usuario, dia_semana=dia_semana, jornada=jornada)
     except HorarioFijo.DoesNotExist:
-        return Response({'detail': 'No tienes horario asignado para esa jornada hoy'}, status=status.HTTP_400_BAD_REQUEST)
+        return Response({'detail': 'No tienes horario asignado para esa jornada en este día'}, status=status.HTTP_400_BAD_REQUEST)
 
-    asistencia, _ = Asistencia.objects.get_or_create(
+    # Crear o obtener la asistencia
+    asistencia, created = Asistencia.objects.get_or_create(
         usuario=usuario,
         fecha=fecha_obj,
         horario=horario,
@@ -1034,17 +1047,35 @@ def monitor_marcar(request):
     if asistencia.estado_autorizacion != 'autorizado':
         return Response(
             {
-                'detail': 'Este bloque aún no ha sido autorizado por un directivo.',
-                'code': 'not_authorized'
+                'detail': 'Esta jornada aún no ha sido autorizada por un directivo.',
+                'code': 'not_authorized',
+                'jornada': jornada,
+                'fecha': fecha_obj.strftime('%Y-%m-%d')
             },
             status=status.HTTP_403_FORBIDDEN
         )
 
+    # Verificar si ya está marcada como presente
+    if asistencia.presente:
+        return Response(
+            {
+                'detail': 'Ya has marcado asistencia para esta jornada',
+                'jornada': jornada,
+                'fecha': fecha_obj.strftime('%Y-%m-%d'),
+                'asistencia': AsistenciaSerializer(asistencia).data
+            },
+            status=status.HTTP_400_BAD_REQUEST
+        )
+
+    # Marcar como presente y calcular horas
     asistencia.presente = True
     calcular_horas_asistencia(asistencia)
     asistencia.save()
 
-    return Response(AsistenciaSerializer(asistencia).data)
+    return Response({
+        'mensaje': f'Asistencia marcada exitosamente para {jornada}',
+        'asistencia': AsistenciaSerializer(asistencia).data
+    })
 
 
 # ===== Endpoints para AJUSTES DE HORAS =====

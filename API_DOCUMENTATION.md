@@ -532,43 +532,80 @@ GET /example/directivo/reportes/horas-todos/?jornada=M&sede=SA
 }
 ```
 
-**Descripción:** Los monitores pueden marcar asistencia **durante todo el día** si la asistencia está autorizada por un directivo. No hay restricciones de horario - pueden marcar la jornada de mañana a las 5 PM si está autorizada.
+**Descripción:** Los monitores pueden marcar asistencia **durante todo el día** si la asistencia está autorizada por un directivo.
+
+**REGLAS DE MARCADO:**
+- ✅ **Flexibilidad total:** Los monitores pueden marcar **CUALQUIER JORNADA** durante **TODO EL DÍA**
+- ✅ **Sin restricciones de horario:** Pueden marcar asistencia de **MAÑANA en la TARDE** y viceversa
+- ✅ **Mismo día:** Solo importa que sea el mismo día y que esté autorizada por un directivo
+- ✅ **Cualquier hora:** No hay restricciones de horario - pueden marcar a las 8 AM, 2 PM, 6 PM, etc.
+- ❌ **No fechas futuras:** No se puede marcar asistencia para fechas futuras
+- ❌ **No duplicados:** No se puede marcar la misma jornada dos veces
 
 **Validaciones:**
 - El usuario debe ser de tipo MONITOR
-- Debe tener horario asignado para esa jornada
+- Debe tener horario asignado para esa jornada en ese día
 - La asistencia debe estar autorizada por un directivo
+- No puede ser una fecha futura
+- No puede marcar la misma jornada dos veces
 
 **Respuesta Exitosa (200):**
 ```json
 {
-  "id": 1,
-  "usuario": {
-    "id": 3,
-    "username": "monitor1",
-    "nombre": "Juan Monitor"
-  },
-  "fecha": "2024-01-15",
-  "horario": {
+  "mensaje": "Asistencia marcada exitosamente para M",
+  "asistencia": {
     "id": 1,
-    "dia_semana": 0,
-    "dia_semana_display": "Lunes",
-    "jornada": "M",
-    "jornada_display": "Mañana",
-    "sede": "SA",
-    "sede_display": "San Antonio"
-  },
-  "presente": true,
-  "estado_autorizacion": "autorizado",
-  "estado_autorizacion_display": "Autorizado",
-  "horas": 4.00
+    "usuario": {
+      "id": 3,
+      "username": "monitor1",
+      "nombre": "Juan Monitor"
+    },
+    "fecha": "2024-01-15",
+    "horario": {
+      "id": 1,
+      "dia_semana": 0,
+      "dia_semana_display": "Lunes",
+      "jornada": "M",
+      "jornada_display": "Mañana",
+      "sede": "SA",
+      "sede_display": "San Antonio"
+    },
+    "presente": true,
+    "estado_autorizacion": "autorizado",
+    "estado_autorizacion_display": "Autorizado",
+    "horas": 4.00
+  }
 }
 ```
 
 **Respuesta de Error (400):**
 ```json
 {
-  "detail": "Jornada inválida"
+  "detail": "Jornada inválida. Debe ser M (Mañana) o T (Tarde)"
+}
+```
+
+**O:**
+```json
+{
+  "detail": "No puedes marcar asistencia para fechas futuras"
+}
+```
+
+**O:**
+```json
+{
+  "detail": "No tienes horario asignado para esa jornada en este día"
+}
+```
+
+**O:**
+```json
+{
+  "detail": "Ya has marcado asistencia para esta jornada",
+  "jornada": "M",
+  "fecha": "2024-01-15",
+  "asistencia": {...}
 }
 ```
 
@@ -582,15 +619,10 @@ GET /example/directivo/reportes/horas-todos/?jornada=M&sede=SA
 **O:**
 ```json
 {
-  "detail": "Este bloque aún no ha sido autorizado por un directivo.",
-  "code": "not_authorized"
-}
-```
-
-**O:**
-```json
-{
-  "detail": "No tienes horario asignado para esa jornada hoy"
+  "detail": "Esta jornada aún no ha sido autorizada por un directivo.",
+  "code": "not_authorized",
+  "jornada": "M",
+  "fecha": "2024-01-15"
 }
 ```
 
@@ -1396,12 +1428,19 @@ curl -X POST http://localhost:8000/example/horarios/ \
   -d '{"dia_semana": 0, "jornada": "M", "sede": "SA"}'
 ```
 
-### 3. Registrar Asistencia
+### 3. Marcar Asistencia (Monitor)
 ```bash
-curl -X POST http://localhost:8000/example/asistencias/ \
+# Marcar asistencia de mañana
+curl -X POST http://localhost:8000/example/monitor/marcar/ \
   -H "Authorization: Bearer <token>" \
   -H "Content-Type: application/json" \
-  -d '{"fecha": "2024-01-15", "horario": 1, "presente": true}'
+  -d '{"fecha": "2024-01-15", "jornada": "M"}'
+
+# Marcar asistencia de tarde
+curl -X POST http://localhost:8000/example/monitor/marcar/ \
+  -H "Authorization: Bearer <token>" \
+  -H "Content-Type: application/json" \
+  -d '{"fecha": "2024-01-15", "jornada": "T"}'
 ```
 
 ### 4. Reporte Financiero Individual
