@@ -1153,12 +1153,197 @@ GET /example/directivo/finanzas/comparativa-semanas/
 ```
 
 **Características de los Endpoints Financieros:**
-- **Costo por hora:** 9,965 COP (fijo para todos los cálculos)
-- **Duración del semestre:** 16 semanas máximo
+- **Costo por hora:** Configurable por directivos (por defecto: 9,965 COP)
+- **Duración del semestre:** Configurable por directivos (por defecto: 14 semanas)
 - **Cálculo de horas:** Cada jornada (M/T) = 4 horas
 - **Proyecciones:** Basadas en horarios fijos de cada monitor
 - **Incluye:** Asistencias + ajustes de horas manuales
 - **Ordenamiento:** Monitores ordenados por costo total (descendente)
+
+---
+
+## ⚙️ Endpoints para Configuraciones del Sistema
+
+### Listar Configuraciones
+**GET** `/example/directivo/configuraciones/`
+
+**Descripción:** Lista todas las configuraciones del sistema que pueden ser editadas por los directivos.
+
+**Headers:** `Authorization: Bearer <token>` (solo DIRECTIVO)
+
+**Respuesta Exitosa (200):**
+```json
+{
+  "total_configuraciones": 2,
+  "configuraciones": [
+    {
+      "id": 1,
+      "clave": "costo_por_hora",
+      "valor": "9965",
+      "descripcion": "Costo por hora de trabajo de los monitores en pesos colombianos (COP)",
+      "tipo_dato": "decimal",
+      "valor_tipado": 9965.0,
+      "creado_por": {
+        "id": 1,
+        "username": "directivo1",
+        "nombre": "María Directivo"
+      },
+      "created_at": "2024-01-15T10:30:00Z",
+      "updated_at": "2024-01-15T10:30:00Z"
+    },
+    {
+      "id": 2,
+      "clave": "semanas_semestre",
+      "valor": "14",
+      "descripcion": "Total de semanas que dura un semestre académico",
+      "tipo_dato": "entero",
+      "valor_tipado": 14,
+      "creado_por": {...},
+      "created_at": "2024-01-15T10:30:00Z",
+      "updated_at": "2024-01-15T10:30:00Z"
+    }
+  ]
+}
+```
+
+### Crear Nueva Configuración
+**POST** `/example/directivo/configuraciones/crear/`
+
+**Descripción:** Crea una nueva configuración del sistema.
+
+**Headers:** `Authorization: Bearer <token>` (solo DIRECTIVO)
+
+**Body:**
+```json
+{
+  "clave": "nueva_configuracion",
+  "valor": "100",
+  "descripcion": "Descripción de la nueva configuración",
+  "tipo_dato": "entero"
+}
+```
+
+**Campos:**
+- `clave`: (requerido) Clave única para identificar la configuración (solo letras, números y guiones bajos)
+- `valor`: (requerido) Valor de la configuración
+- `descripcion`: (requerido) Descripción de qué representa esta configuración
+- `tipo_dato`: (requerido) Tipo de dato: "decimal", "entero", "texto", "booleano"
+
+**Respuesta Exitosa (201):**
+```json
+{
+  "id": 3,
+  "clave": "nueva_configuracion",
+  "valor": "100",
+  "descripcion": "Descripción de la nueva configuración",
+  "tipo_dato": "entero",
+  "valor_tipado": 100,
+  "creado_por": {...},
+  "created_at": "2024-01-15T10:30:00Z",
+  "updated_at": "2024-01-15T10:30:00Z"
+}
+```
+
+### Inicializar Configuraciones por Defecto
+**POST** `/example/directivo/configuraciones/inicializar/`
+
+**Descripción:** Crea las configuraciones básicas del sistema (costo por hora y semanas del semestre) si no existen.
+
+**Headers:** `Authorization: Bearer <token>` (solo DIRECTIVO)
+
+**Respuesta Exitosa (201):**
+```json
+{
+  "mensaje": "Se crearon 2 configuraciones nuevas",
+  "configuraciones_creadas": [
+    {
+      "id": 1,
+      "clave": "costo_por_hora",
+      "valor": "9965",
+      "descripcion": "Costo por hora de trabajo de los monitores en pesos colombianos (COP)",
+      "tipo_dato": "decimal",
+      "valor_tipado": 9965.0
+    },
+    {
+      "id": 2,
+      "clave": "semanas_semestre",
+      "valor": "14",
+      "descripcion": "Total de semanas que dura un semestre académico",
+      "tipo_dato": "entero",
+      "valor_tipado": 14
+    }
+  ],
+  "configuraciones_existentes": [],
+  "total_procesadas": 2
+}
+```
+
+### Obtener/Actualizar/Eliminar Configuración
+**GET/PUT/DELETE** `/example/directivo/configuraciones/{clave}/`
+
+**Descripción:** Obtiene, actualiza o elimina una configuración específica por su clave.
+
+**Headers:** `Authorization: Bearer <token>` (solo DIRECTIVO)
+
+#### GET - Obtener Configuración
+**Ejemplo:**
+```bash
+GET /example/directivo/configuraciones/costo_por_hora/
+```
+
+**Respuesta Exitosa (200):**
+```json
+{
+  "id": 1,
+  "clave": "costo_por_hora",
+  "valor": "9965",
+  "descripcion": "Costo por hora de trabajo de los monitores en pesos colombianos (COP)",
+  "tipo_dato": "decimal",
+  "valor_tipado": 9965.0,
+  "creado_por": {...},
+  "created_at": "2024-01-15T10:30:00Z",
+  "updated_at": "2024-01-15T10:30:00Z"
+}
+```
+
+#### PUT - Actualizar Configuración
+**Body:**
+```json
+{
+  "valor": "10000",
+  "descripcion": "Costo por hora actualizado",
+  "tipo_dato": "decimal"
+}
+```
+
+#### DELETE - Eliminar Configuración
+**Respuesta Exitosa (204):**
+```json
+{
+  "detail": "Configuración eliminada exitosamente"
+}
+```
+
+**Respuesta de Error (400):**
+```json
+{
+  "valor": ["El valor debe ser un número decimal válido."]
+}
+```
+
+**Respuesta de Error (404):**
+```json
+{
+  "detail": "Configuración no encontrada"
+}
+```
+
+**Características de las Configuraciones:**
+- **Claves predefinidas:** `costo_por_hora`, `semanas_semestre`
+- **Tipos de dato:** decimal, entero, texto, booleano
+- **Validación:** Valores validados según el tipo de dato
+- **Trazabilidad:** Registro de quién creó/modificó cada configuración
+- **Valor tipado:** Conversión automática del valor al tipo correspondiente
 
 ---
 
@@ -1235,6 +1420,28 @@ curl -X GET "http://localhost:8000/example/directivo/finanzas/resumen-ejecutivo/
 ```bash
 curl -X GET "http://localhost:8000/example/directivo/finanzas/comparativa-semanas/" \
   -H "Authorization: Bearer <token>"
+```
+
+### 7. Inicializar Configuraciones por Defecto
+```bash
+curl -X POST "http://localhost:8000/example/directivo/configuraciones/inicializar/" \
+  -H "Authorization: Bearer <token>"
+```
+
+### 8. Actualizar Costo por Hora
+```bash
+curl -X PUT "http://localhost:8000/example/directivo/configuraciones/costo_por_hora/" \
+  -H "Authorization: Bearer <token>" \
+  -H "Content-Type: application/json" \
+  -d '{"valor": "10000", "descripcion": "Costo por hora actualizado", "tipo_dato": "decimal"}'
+```
+
+### 9. Actualizar Semanas del Semestre
+```bash
+curl -X PUT "http://localhost:8000/example/directivo/configuraciones/semanas_semestre/" \
+  -H "Authorization: Bearer <token>" \
+  -H "Content-Type: application/json" \
+  -d '{"valor": "16", "descripcion": "Semestre de 16 semanas", "tipo_dato": "entero"}'
 ```
 
 ---

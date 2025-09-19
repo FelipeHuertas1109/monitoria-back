@@ -11,7 +11,7 @@ from rest_framework_simplejwt.exceptions import InvalidToken, TokenError
 from django.contrib.auth import authenticate
 from django.utils import timezone
 from datetime import datetime, date
-from .models import UsuarioPersonalizado, HorarioFijo, Asistencia, AjusteHoras
+from .models import UsuarioPersonalizado, HorarioFijo, Asistencia, AjusteHoras, ConfiguracionSistema
 
 def calcular_horas_asistencia(asistencia):
     """
@@ -65,7 +65,8 @@ def calcular_horas_totales_monitor(monitor_id, fecha_inicio, fecha_fin, sede=Non
 from .serializers import (
     LoginSerializer, TokenSerializer, UsuarioSerializer, UsuarioCreateSerializer,
     HorarioFijoSerializer, HorarioFijoCreateSerializer, HorarioFijoMultipleSerializer, HorarioFijoEditMultipleSerializer,
-    AsistenciaSerializer, AsistenciaCreateSerializer, AjusteHorasSerializer, AjusteHorasCreateSerializer
+    AsistenciaSerializer, AsistenciaCreateSerializer, AjusteHorasSerializer, AjusteHorasCreateSerializer,
+    ConfiguracionSistemaSerializer, ConfiguracionSistemaCreateSerializer
 )
 
 # Autenticación personalizada para JWT con nuestro modelo
@@ -1238,6 +1239,31 @@ def directivo_buscar_monitores(request):
 
 # ===== Endpoints para FINANZAS =====
 
+def obtener_configuracion(clave, valor_por_defecto=None):
+    """
+    Obtiene el valor de una configuración del sistema.
+    Si no existe, retorna el valor por defecto.
+    """
+    try:
+        config = ConfiguracionSistema.objects.get(clave=clave)
+        return config.get_valor_tipado()
+    except ConfiguracionSistema.DoesNotExist:
+        return valor_por_defecto
+
+def obtener_costo_por_hora():
+    """
+    Obtiene el costo por hora desde las configuraciones.
+    Por defecto: 9965 COP
+    """
+    return obtener_configuracion('costo_por_hora', 9965.0)
+
+def obtener_semanas_semestre():
+    """
+    Obtiene el total de semanas del semestre desde las configuraciones.
+    Por defecto: 14 semanas
+    """
+    return obtener_configuracion('semanas_semestre', 14)
+
 def calcular_horas_semanales_monitor(monitor_id):
     """
     Calcula las horas semanales que debe trabajar un monitor basado en sus horarios fijos.
@@ -1253,18 +1279,21 @@ def calcular_costo_total_monitor(monitor_id, fecha_inicio, fecha_fin):
     Incluye horas de asistencias + ajustes de horas.
     """
     calculo_horas = calcular_horas_totales_monitor(monitor_id, fecha_inicio, fecha_fin)
-    costo_por_hora = 9965  # COP
+    costo_por_hora = obtener_costo_por_hora()
     costo_total = calculo_horas['horas_totales'] * costo_por_hora
     return round(costo_total, 2)
 
-def calcular_costo_proyectado_monitor(monitor_id, semanas_trabajadas, total_semanas=16):
+def calcular_costo_proyectado_monitor(monitor_id, semanas_trabajadas, total_semanas=None):
     """
     Calcula el costo proyectado de un monitor basado en sus horarios fijos.
     """
+    if total_semanas is None:
+        total_semanas = obtener_semanas_semestre()
+    
     horas_semanales = calcular_horas_semanales_monitor(monitor_id)
     horas_totales_proyectadas = horas_semanales * total_semanas
     horas_trabajadas_proyectadas = horas_semanales * semanas_trabajadas
-    costo_por_hora = 9965  # COP
+    costo_por_hora = obtener_costo_por_hora()
     
     return {
         'horas_semanales': horas_semanales,
@@ -1321,8 +1350,9 @@ def directivo_finanzas_monitor_individual(request, monitor_id):
     # Validar semanas_trabajadas
     try:
         semanas_trabajadas = int(semanas_trabajadas)
-        if semanas_trabajadas < 0 or semanas_trabajadas > 16:
-            return Response({'detail': 'semanas_trabajadas debe estar entre 0 y 16'}, status=status.HTTP_400_BAD_REQUEST)
+        max_semanas = obtener_semanas_semestre()
+        if semanas_trabajadas < 0 or semanas_trabajadas > max_semanas:
+            return Response({'detail': f'semanas_trabajadas debe estar entre 0 y {max_semanas}'}, status=status.HTTP_400_BAD_REQUEST)
     except ValueError:
         return Response({'detail': 'semanas_trabajadas debe ser un número entero'}, status=status.HTTP_400_BAD_REQUEST)
 
@@ -1365,7 +1395,7 @@ def directivo_finanzas_monitor_individual(request, monitor_id):
             'horas_asistencias': calculo_horas['horas_asistencias'],
             'horas_ajustes': calculo_horas['horas_ajustes'],
             'costo_total': costo_actual,
-            'costo_por_hora': 9965
+            'costo_por_hora': obtener_costo_por_hora()
         },
         'proyeccion_semestre': {
             'semanas_trabajadas': proyeccion['semanas_trabajadas'],
@@ -1374,7 +1404,7 @@ def directivo_finanzas_monitor_individual(request, monitor_id):
             'horas_trabajadas_proyectadas': proyeccion['horas_trabajadas_proyectadas'],
             'costo_total_proyectado': proyeccion['costo_total_proyectado'],
             'costo_trabajado_proyectado': proyeccion['costo_trabajado_proyectado'],
-            'porcentaje_completado': round((proyeccion['semanas_trabajadas'] / 16) * 100, 2)
+            'porcentaje_completado': round((proyeccion['semanas_trabajadas'] / obtener_semanas_semestre()) * 100, 2)
         },
         'estadisticas': {
             'total_asistencias': calculo_horas['total_asistencias'],
@@ -1424,8 +1454,9 @@ def directivo_finanzas_todos_monitores(request):
     # Validar semanas_trabajadas
     try:
         semanas_trabajadas = int(semanas_trabajadas)
-        if semanas_trabajadas < 0 or semanas_trabajadas > 16:
-            return Response({'detail': 'semanas_trabajadas debe estar entre 0 y 16'}, status=status.HTTP_400_BAD_REQUEST)
+        max_semanas = obtener_semanas_semestre()
+        if semanas_trabajadas < 0 or semanas_trabajadas > max_semanas:
+            return Response({'detail': f'semanas_trabajadas debe estar entre 0 y {max_semanas}'}, status=status.HTTP_400_BAD_REQUEST)
     except ValueError:
         return Response({'detail': 'semanas_trabajadas debe ser un número entero'}, status=status.HTTP_400_BAD_REQUEST)
 
@@ -1466,7 +1497,7 @@ def directivo_finanzas_todos_monitores(request):
                     'semanas_faltantes': proyeccion['semanas_faltantes'],
                     'costo_total_proyectado': proyeccion['costo_total_proyectado'],
                     'costo_trabajado_proyectado': proyeccion['costo_trabajado_proyectado'],
-                    'porcentaje_completado': round((proyeccion['semanas_trabajadas'] / 16) * 100, 2)
+                    'porcentaje_completado': round((proyeccion['semanas_trabajadas'] / obtener_semanas_semestre()) * 100, 2)
                 },
                 'estadisticas': {
                     'total_asistencias': calculo_horas['total_asistencias'],
@@ -1506,7 +1537,7 @@ def directivo_finanzas_todos_monitores(request):
             'horas_totales_actuales': round(total_horas_actuales, 2),
             'horas_totales_proyectadas': round(total_horas_proyectadas, 2),
             'horas_promedio_por_monitor': round(horas_promedio_por_monitor, 2),
-            'costo_por_hora': 9965
+            'costo_por_hora': obtener_costo_por_hora()
         },
         'resumen_financiero': {
             'diferencia_proyeccion_vs_actual': round(total_costo_proyectado - total_costo_actual, 2),
@@ -1557,8 +1588,9 @@ def directivo_finanzas_resumen_ejecutivo(request):
     # Validar semanas_trabajadas
     try:
         semanas_trabajadas = int(semanas_trabajadas)
-        if semanas_trabajadas < 0 or semanas_trabajadas > 16:
-            return Response({'detail': 'semanas_trabajadas debe estar entre 0 y 16'}, status=status.HTTP_400_BAD_REQUEST)
+        max_semanas = obtener_semanas_semestre()
+        if semanas_trabajadas < 0 or semanas_trabajadas > max_semanas:
+            return Response({'detail': f'semanas_trabajadas debe estar entre 0 y {max_semanas}'}, status=status.HTTP_400_BAD_REQUEST)
     except ValueError:
         return Response({'detail': 'semanas_trabajadas debe ser un número entero'}, status=status.HTTP_400_BAD_REQUEST)
 
@@ -1644,7 +1676,7 @@ def directivo_finanzas_resumen_ejecutivo(request):
             'horas_totales_proyectadas': round(total_horas_proyectadas, 2)
         },
         'indicadores_financieros': {
-            'costo_por_hora': 9965,
+            'costo_por_hora': obtener_costo_por_hora(),
             'costo_promedio_por_monitor': round(total_costo_actual / max(1, monitores_con_horarios), 2),
             'costo_semanal_promedio': round(costo_semanal_promedio, 2),
             'porcentaje_ejecutado': round(porcentaje_ejecutado, 2),
@@ -1688,7 +1720,7 @@ def directivo_finanzas_comparativa_semanas(request):
     
     # Calcular datos por semana (simulado para las primeras 16 semanas)
     semanas_data = []
-    total_semanas = 16
+    total_semanas = obtener_semanas_semestre()
     
     for semana in range(1, total_semanas + 1):
         semana_costo_total = 0.0
@@ -1744,3 +1776,163 @@ def directivo_finanzas_comparativa_semanas(request):
     }
 
     return Response(response_data)
+
+
+# ===== Endpoints para CONFIGURACIONES DEL SISTEMA =====
+
+@api_view(['GET'])
+@authentication_classes([])
+@permission_classes([AllowAny])
+def directivo_configuraciones(request):
+    """
+    Listar todas las configuraciones del sistema.
+    Acceso: solo DIRECTIVO
+    """
+    # Autenticación manual
+    auth_header = request.headers.get('Authorization')
+    if not auth_header or not auth_header.startswith('Bearer '):
+        return Response({'detail': 'Token de autenticación requerido'}, status=status.HTTP_401_UNAUTHORIZED)
+
+    # Usuario DIRECTIVO temporal
+    usuario_directivo = UsuarioPersonalizado.objects.filter(tipo_usuario='DIRECTIVO').first()
+    if not usuario_directivo:
+        return Response({'detail': 'No hay usuarios DIRECTIVO'}, status=status.HTTP_403_FORBIDDEN)
+
+    configuraciones = ConfiguracionSistema.objects.all().select_related('creado_por')
+    serializer = ConfiguracionSistemaSerializer(configuraciones, many=True)
+    
+    return Response({
+        'total_configuraciones': configuraciones.count(),
+        'configuraciones': serializer.data
+    })
+
+@api_view(['POST'])
+@authentication_classes([])
+@permission_classes([AllowAny])
+def directivo_configuraciones_crear(request):
+    """
+    Crear nueva configuración del sistema.
+    Acceso: solo DIRECTIVO
+    """
+    # Autenticación manual
+    auth_header = request.headers.get('Authorization')
+    if not auth_header or not auth_header.startswith('Bearer '):
+        return Response({'detail': 'Token de autenticación requerido'}, status=status.HTTP_401_UNAUTHORIZED)
+
+    # Usuario DIRECTIVO temporal
+    usuario_directivo = UsuarioPersonalizado.objects.filter(tipo_usuario='DIRECTIVO').first()
+    if not usuario_directivo:
+        return Response({'detail': 'No hay usuarios DIRECTIVO'}, status=status.HTTP_403_FORBIDDEN)
+
+    serializer = ConfiguracionSistemaCreateSerializer(data=request.data)
+    if serializer.is_valid():
+        # Verificar si ya existe una configuración con esa clave
+        clave = serializer.validated_data['clave']
+        if ConfiguracionSistema.objects.filter(clave=clave).exists():
+            return Response(
+                {'detail': f'Ya existe una configuración con la clave "{clave}"'}, 
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        
+        configuracion = serializer.save(creado_por=usuario_directivo)
+        return Response(ConfiguracionSistemaSerializer(configuracion).data, status=status.HTTP_201_CREATED)
+    else:
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+@api_view(['GET', 'PUT', 'DELETE'])
+@authentication_classes([])
+@permission_classes([AllowAny])
+def directivo_configuraciones_detalle(request, clave):
+    """
+    GET: Obtener configuración específica
+    PUT: Actualizar configuración
+    DELETE: Eliminar configuración
+    Acceso: solo DIRECTIVO
+    """
+    # Autenticación manual
+    auth_header = request.headers.get('Authorization')
+    if not auth_header or not auth_header.startswith('Bearer '):
+        return Response({'detail': 'Token de autenticación requerido'}, status=status.HTTP_401_UNAUTHORIZED)
+
+    # Usuario DIRECTIVO temporal
+    usuario_directivo = UsuarioPersonalizado.objects.filter(tipo_usuario='DIRECTIVO').first()
+    if not usuario_directivo:
+        return Response({'detail': 'No hay usuarios DIRECTIVO'}, status=status.HTTP_403_FORBIDDEN)
+
+    try:
+        configuracion = ConfiguracionSistema.objects.select_related('creado_por').get(clave=clave)
+    except ConfiguracionSistema.DoesNotExist:
+        return Response({'detail': 'Configuración no encontrada'}, status=status.HTTP_404_NOT_FOUND)
+
+    if request.method == 'GET':
+        serializer = ConfiguracionSistemaSerializer(configuracion)
+        return Response(serializer.data)
+    
+    elif request.method == 'PUT':
+        serializer = ConfiguracionSistemaCreateSerializer(configuracion, data=request.data)
+        if serializer.is_valid():
+            serializer.save()
+            return Response(ConfiguracionSistemaSerializer(configuracion).data)
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+    
+    elif request.method == 'DELETE':
+        configuracion.delete()
+        return Response({'detail': 'Configuración eliminada exitosamente'}, status=status.HTTP_204_NO_CONTENT)
+
+@api_view(['POST'])
+@authentication_classes([])
+@permission_classes([AllowAny])
+def directivo_configuraciones_inicializar(request):
+    """
+    Inicializar configuraciones por defecto del sistema.
+    Acceso: solo DIRECTIVO
+    """
+    # Autenticación manual
+    auth_header = request.headers.get('Authorization')
+    if not auth_header or not auth_header.startswith('Bearer '):
+        return Response({'detail': 'Token de autenticación requerido'}, status=status.HTTP_401_UNAUTHORIZED)
+
+    # Usuario DIRECTIVO temporal
+    usuario_directivo = UsuarioPersonalizado.objects.filter(tipo_usuario='DIRECTIVO').first()
+    if not usuario_directivo:
+        return Response({'detail': 'No hay usuarios DIRECTIVO'}, status=status.HTTP_403_FORBIDDEN)
+
+    configuraciones_por_defecto = [
+        {
+            'clave': 'costo_por_hora',
+            'valor': '9965',
+            'descripcion': 'Costo por hora de trabajo de los monitores en pesos colombianos (COP)',
+            'tipo_dato': 'decimal'
+        },
+        {
+            'clave': 'semanas_semestre',
+            'valor': '14',
+            'descripcion': 'Total de semanas que dura un semestre académico',
+            'tipo_dato': 'entero'
+        }
+    ]
+
+    configuraciones_creadas = []
+    configuraciones_existentes = []
+
+    for config_data in configuraciones_por_defecto:
+        clave = config_data['clave']
+        
+        if ConfiguracionSistema.objects.filter(clave=clave).exists():
+            configuraciones_existentes.append(clave)
+        else:
+            configuracion = ConfiguracionSistema.objects.create(
+                clave=clave,
+                valor=config_data['valor'],
+                descripcion=config_data['descripcion'],
+                tipo_dato=config_data['tipo_dato'],
+                creado_por=usuario_directivo
+            )
+            configuraciones_creadas.append(ConfiguracionSistemaSerializer(configuracion).data)
+
+    return Response({
+        'mensaje': f'Se crearon {len(configuraciones_creadas)} configuraciones nuevas',
+        'configuraciones_creadas': configuraciones_creadas,
+        'configuraciones_existentes': configuraciones_existentes,
+        'total_procesadas': len(configuraciones_por_defecto)
+    }, status=status.HTTP_201_CREATED)

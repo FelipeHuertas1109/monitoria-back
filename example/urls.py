@@ -43,4 +43,10 @@ urlpatterns = [
     path('directivo/finanzas/todos-monitores/', views.directivo_finanzas_todos_monitores, name='directivo_finanzas_todos_monitores'),
     path('directivo/finanzas/resumen-ejecutivo/', views.directivo_finanzas_resumen_ejecutivo, name='directivo_finanzas_resumen_ejecutivo'),
     path('directivo/finanzas/comparativa-semanas/', views.directivo_finanzas_comparativa_semanas, name='directivo_finanzas_comparativa_semanas'),
+    
+    # Configuraciones del Sistema
+    path('directivo/configuraciones/', views.directivo_configuraciones, name='directivo_configuraciones'),
+    path('directivo/configuraciones/crear/', views.directivo_configuraciones_crear, name='directivo_configuraciones_crear'),
+    path('directivo/configuraciones/inicializar/', views.directivo_configuraciones_inicializar, name='directivo_configuraciones_inicializar'),
+    path('directivo/configuraciones/<str:clave>/', views.directivo_configuraciones_detalle, name='directivo_configuraciones_detalle'),
 ]

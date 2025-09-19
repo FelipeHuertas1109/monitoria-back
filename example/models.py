@@ -159,3 +159,69 @@ class AjusteHoras(models.Model):
     def __str__(self):
         signo = "+" if self.cantidad_horas >= 0 else ""
         return f"{self.usuario.nombre} - {self.fecha} - {signo}{self.cantidad_horas}h - {self.motivo[:50]}"
+
+
+class ConfiguracionSistema(models.Model):
+    """
+    Modelo para configuraciones del sistema que pueden ser editadas por directivos.
+    Incluye parámetros financieros y de tiempo.
+    """
+    clave = models.CharField(
+        max_length=50, 
+        unique=True,
+        help_text="Clave única para identificar la configuración"
+    )
+    valor = models.CharField(
+        max_length=255,
+        help_text="Valor de la configuración"
+    )
+    descripcion = models.TextField(
+        help_text="Descripción de qué representa esta configuración"
+    )
+    tipo_dato = models.CharField(
+        max_length=20,
+        choices=[
+            ('decimal', 'Decimal'),
+            ('entero', 'Entero'),
+            ('texto', 'Texto'),
+            ('booleano', 'Booleano')
+        ],
+        default='texto',
+        help_text="Tipo de dato de la configuración"
+    )
+    creado_por = models.ForeignKey(
+        UsuarioPersonalizado,
+        on_delete=models.CASCADE,
+        related_name="configuraciones_creadas",
+        limit_choices_to={'tipo_usuario': 'DIRECTIVO'},
+        help_text="Directivo que creó esta configuración"
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        verbose_name = "Configuración del Sistema"
+        verbose_name_plural = "Configuraciones del Sistema"
+        ordering = ['clave']
+
+    def get_valor_tipado(self):
+        """
+        Retorna el valor convertido al tipo de dato correspondiente.
+        """
+        if self.tipo_dato == 'decimal':
+            try:
+                return float(self.valor)
+            except ValueError:
+                return 0.0
+        elif self.tipo_dato == 'entero':
+            try:
+                return int(self.valor)
+            except ValueError:
+                return 0
+        elif self.tipo_dato == 'booleano':
+            return self.valor.lower() in ['true', '1', 'yes', 'si']
+        else:
+            return self.valor
+
+    def __str__(self):
+        return f"{self.clave}: {self.valor} ({self.tipo_dato})"

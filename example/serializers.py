@@ -1,5 +1,5 @@
 from rest_framework import serializers
-from .models import UsuarioPersonalizado, HorarioFijo, Asistencia, AjusteHoras
+from .models import UsuarioPersonalizado, HorarioFijo, Asistencia, AjusteHoras, ConfiguracionSistema
 
 class UsuarioSerializer(serializers.ModelSerializer):
     tipo_usuario_display = serializers.CharField(source='get_tipo_usuario_display', read_only=True)
@@ -235,3 +235,64 @@ class AjusteHorasCreateSerializer(serializers.ModelSerializer):
                 pass  # Ya validado en validate_asistencia_id
         
         return data
+
+
+# Serializers para Configuraciones del Sistema
+
+class ConfiguracionSistemaSerializer(serializers.ModelSerializer):
+    """
+    Serializer para configuraciones del sistema.
+    """
+    creado_por = UsuarioSerializer(read_only=True)
+    valor_tipado = serializers.SerializerMethodField()
+    
+    class Meta:
+        model = ConfiguracionSistema
+        fields = [
+            'id', 'clave', 'valor', 'descripcion', 'tipo_dato',
+            'creado_por', 'created_at', 'updated_at', 'valor_tipado'
+        ]
+        read_only_fields = ['id', 'creado_por', 'created_at', 'updated_at']
+    
+    def get_valor_tipado(self, obj):
+        return obj.get_valor_tipado()
+
+class ConfiguracionSistemaCreateSerializer(serializers.ModelSerializer):
+    """
+    Serializer para crear/actualizar configuraciones del sistema.
+    """
+    class Meta:
+        model = ConfiguracionSistema
+        fields = ['clave', 'valor', 'descripcion', 'tipo_dato']
+    
+    def validate_clave(self, value):
+        """
+        Validar que la clave sea única y tenga formato válido.
+        """
+        if not value.replace('_', '').isalnum():
+            raise serializers.ValidationError("La clave solo puede contener letras, números y guiones bajos.")
+        return value.lower()
+    
+    def validate_valor(self, value):
+        """
+        Validar el valor según el tipo de dato.
+        """
+        tipo_dato = self.initial_data.get('tipo_dato')
+        
+        if tipo_dato == 'decimal':
+            try:
+                float(value)
+            except ValueError:
+                raise serializers.ValidationError("El valor debe ser un número decimal válido.")
+        
+        elif tipo_dato == 'entero':
+            try:
+                int(value)
+            except ValueError:
+                raise serializers.ValidationError("El valor debe ser un número entero válido.")
+        
+        elif tipo_dato == 'booleano':
+            if value.lower() not in ['true', 'false', '1', '0', 'yes', 'no', 'si', 'no']:
+                raise serializers.ValidationError("El valor debe ser true/false, 1/0, yes/no o si/no.")
+        
+        return value
