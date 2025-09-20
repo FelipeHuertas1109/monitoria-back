@@ -1914,6 +1914,182 @@ def directivo_configuraciones_detalle(request, clave):
         configuracion.delete()
         return Response({'detail': 'Configuración eliminada exitosamente'}, status=status.HTTP_204_NO_CONTENT)
 
+@api_view(['GET'])
+@authentication_classes([])
+@permission_classes([AllowAny])
+def directivo_total_horas_horarios(request):
+    """
+    Calcular el total de horas basado en los horarios fijos de los monitores * total de semanas.
+    Filtros opcionales: monitor_id, sede, jornada
+    Acceso: solo DIRECTIVO
+    """
+    # Autenticación manual
+    auth_header = request.headers.get('Authorization')
+    if not auth_header or not auth_header.startswith('Bearer '):
+        return Response({'detail': 'Token de autenticación requerido'}, status=status.HTTP_401_UNAUTHORIZED)
+
+    # Usuario DIRECTIVO temporal
+    usuario_directivo = UsuarioPersonalizado.objects.filter(tipo_usuario='DIRECTIVO').first()
+    if not usuario_directivo:
+        return Response({'detail': 'No hay usuarios DIRECTIVO'}, status=status.HTTP_403_FORBIDDEN)
+
+    # Parámetros de filtrado
+    monitor_id = request.query_params.get('monitor_id')
+    sede = request.query_params.get('sede')  # SA|BA
+    jornada = request.query_params.get('jornada')  # M|T
+
+    # Validar filtros
+    if sede and sede not in ['SA', 'BA']:
+        return Response({'detail': 'sede debe ser SA o BA'}, status=status.HTTP_400_BAD_REQUEST)
+    if jornada and jornada not in ['M', 'T']:
+        return Response({'detail': 'jornada debe ser M o T'}, status=status.HTTP_400_BAD_REQUEST)
+
+    # Obtener configuración de semanas del semestre
+    total_semanas = obtener_semanas_semestre()
+    costo_por_hora = obtener_costo_por_hora()
+
+    # Query base para horarios fijos
+    horarios_qs = HorarioFijo.objects.filter(usuario__tipo_usuario='MONITOR')
+    
+    # Aplicar filtros
+    if monitor_id:
+        try:
+            monitor_id = int(monitor_id)
+            horarios_qs = horarios_qs.filter(usuario__id=monitor_id)
+        except ValueError:
+            return Response({'detail': 'monitor_id debe ser un número entero'}, status=status.HTTP_400_BAD_REQUEST)
+    
+    if sede:
+        horarios_qs = horarios_qs.filter(sede=sede)
+    if jornada:
+        horarios_qs = horarios_qs.filter(jornada=jornada)
+
+    # Calcular estadísticas por monitor
+    monitores_data = {}
+    total_horarios = 0
+    total_horas_semanales = 0
+    total_horas_semestre = 0
+    total_costo_semestre = 0
+
+    # Agrupar horarios por monitor
+    for horario in horarios_qs.select_related('usuario'):
+        monitor = horario.usuario
+        monitor_id = monitor.id
+        
+        if monitor_id not in monitores_data:
+            monitores_data[monitor_id] = {
+                'monitor': {
+                    'id': monitor.id,
+                    'username': monitor.username,
+                    'nombre': monitor.nombre
+                },
+                'horarios': [],
+                'horas_semanales': 0,
+                'horas_semestre': 0,
+                'costo_semestre': 0,
+                'total_jornadas_semana': 0
+            }
+        
+        # Agregar horario al monitor
+        horario_data = {
+            'id': horario.id,
+            'dia_semana': horario.dia_semana,
+            'dia_semana_display': horario.get_dia_semana_display(),
+            'jornada': horario.jornada,
+            'jornada_display': horario.get_jornada_display(),
+            'sede': horario.sede,
+            'sede_display': horario.get_sede_display()
+        }
+        monitores_data[monitor_id]['horarios'].append(horario_data)
+        monitores_data[monitor_id]['total_jornadas_semana'] += 1
+
+    # Calcular horas y costos para cada monitor
+    for monitor_id, data in monitores_data.items():
+        # Cada jornada = 4 horas
+        horas_semanales = data['total_jornadas_semana'] * 4
+        horas_semestre = horas_semanales * total_semanas
+        costo_semestre = horas_semestre * costo_por_hora
+        
+        data['horas_semanales'] = horas_semanales
+        data['horas_semestre'] = horas_semestre
+        data['costo_semestre'] = round(costo_semestre, 2)
+        
+        # Acumular totales
+        total_horarios += data['total_jornadas_semana']
+        total_horas_semanales += horas_semanales
+        total_horas_semestre += horas_semestre
+        total_costo_semestre += costo_semestre
+
+    # Ordenar monitores por horas semanales (descendente)
+    monitores_ordenados = sorted(
+        monitores_data.values(),
+        key=lambda x: x['horas_semanales'],
+        reverse=True
+    )
+
+    # Calcular estadísticas generales
+    total_monitores = len(monitores_data)
+    promedio_horas_semana = total_horas_semanales / max(1, total_monitores)
+    promedio_costo_semestre = total_costo_semestre / max(1, total_monitores)
+
+    # Respuesta
+    response_data = {
+        'configuracion': {
+            'total_semanas_semestre': total_semanas,
+            'costo_por_hora': costo_por_hora,
+            'horas_por_jornada': 4
+        },
+        'estadisticas_generales': {
+            'total_monitores': total_monitores,
+            'total_horarios': total_horarios,
+            'total_horas_semanales': total_horas_semanales,
+            'total_horas_semestre': total_horas_semestre,
+            'total_costo_semestre': round(total_costo_semestre, 2),
+            'promedio_horas_semana_por_monitor': round(promedio_horas_semana, 2),
+            'promedio_costo_semestre_por_monitor': round(promedio_costo_semestre, 2)
+        },
+        'filtros_aplicados': {
+            'monitor_id': monitor_id,
+            'sede': sede,
+            'jornada': jornada
+        },
+        'monitores': monitores_ordenados,
+        'resumen_por_sede': _calcular_resumen_por_sede(monitores_data),
+        'resumen_por_jornada': _calcular_resumen_por_jornada(monitores_data)
+    }
+
+    return Response(response_data)
+
+def _calcular_resumen_por_sede(monitores_data):
+    """Calcular resumen de horas por sede"""
+    resumen = {'SA': {'monitores': 0, 'horas_semana': 0, 'horas_semestre': 0}, 
+               'BA': {'monitores': 0, 'horas_semana': 0, 'horas_semestre': 0}}
+    
+    for data in monitores_data.values():
+        for horario in data['horarios']:
+            sede = horario['sede']
+            if sede in resumen:
+                resumen[sede]['monitores'] += 1
+                resumen[sede]['horas_semana'] += 4  # 4 horas por jornada
+                resumen[sede]['horas_semestre'] += 4 * 14  # 14 semanas por defecto
+    
+    return resumen
+
+def _calcular_resumen_por_jornada(monitores_data):
+    """Calcular resumen de horas por jornada"""
+    resumen = {'M': {'monitores': 0, 'horas_semana': 0, 'horas_semestre': 0}, 
+               'T': {'monitores': 0, 'horas_semana': 0, 'horas_semestre': 0}}
+    
+    for data in monitores_data.values():
+        for horario in data['horarios']:
+            jornada = horario['jornada']
+            if jornada in resumen:
+                resumen[jornada]['monitores'] += 1
+                resumen[jornada]['horas_semana'] += 4  # 4 horas por jornada
+                resumen[jornada]['horas_semestre'] += 4 * 14  # 14 semanas por defecto
+    
+    return resumen
+
 @api_view(['POST'])
 @authentication_classes([])
 @permission_classes([AllowAny])
