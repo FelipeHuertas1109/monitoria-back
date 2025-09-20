@@ -1914,6 +1914,46 @@ def directivo_configuraciones_detalle(request, clave):
         configuracion.delete()
         return Response({'detail': 'Configuración eliminada exitosamente'}, status=status.HTTP_204_NO_CONTENT)
 
+@api_view(['GET', 'PUT', 'DELETE'])
+@authentication_classes([])
+@permission_classes([AllowAny])
+def directivo_configuraciones_detalle_por_id(request, id):
+    """
+    GET: Obtener configuración específica por ID
+    PUT: Actualizar configuración por ID
+    DELETE: Eliminar configuración por ID
+    Acceso: solo DIRECTIVO
+    """
+    # Autenticación manual
+    auth_header = request.headers.get('Authorization')
+    if not auth_header or not auth_header.startswith('Bearer '):
+        return Response({'detail': 'Token de autenticación requerido'}, status=status.HTTP_401_UNAUTHORIZED)
+
+    # Usuario DIRECTIVO temporal
+    usuario_directivo = UsuarioPersonalizado.objects.filter(tipo_usuario='DIRECTIVO').first()
+    if not usuario_directivo:
+        return Response({'detail': 'No hay usuarios DIRECTIVO'}, status=status.HTTP_403_FORBIDDEN)
+
+    try:
+        configuracion = ConfiguracionSistema.objects.select_related('creado_por').get(id=id)
+    except ConfiguracionSistema.DoesNotExist:
+        return Response({'detail': 'Configuración no encontrada'}, status=status.HTTP_404_NOT_FOUND)
+
+    if request.method == 'GET':
+        serializer = ConfiguracionSistemaSerializer(configuracion)
+        return Response(serializer.data)
+    
+    elif request.method == 'PUT':
+        serializer = ConfiguracionSistemaCreateSerializer(configuracion, data=request.data)
+        if serializer.is_valid():
+            serializer.save()
+            return Response(ConfiguracionSistemaSerializer(configuracion).data)
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+    
+    elif request.method == 'DELETE':
+        configuracion.delete()
+        return Response({'detail': 'Configuración eliminada exitosamente'}, status=status.HTTP_204_NO_CONTENT)
+
 @api_view(['GET'])
 @authentication_classes([])
 @permission_classes([AllowAny])

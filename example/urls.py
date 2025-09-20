@@ -50,4 +50,5 @@ urlpatterns = [
     path('directivo/configuraciones/crear/', views.directivo_configuraciones_crear, name='directivo_configuraciones_crear'),
     path('directivo/configuraciones/inicializar/', views.directivo_configuraciones_inicializar, name='directivo_configuraciones_inicializar'),
     path('directivo/configuraciones/<str:clave>/', views.directivo_configuraciones_detalle, name='directivo_configuraciones_detalle'),
+    path('directivo/configuraciones/<int:id>/', views.directivo_configuraciones_detalle_por_id, name='directivo_configuraciones_detalle_por_id'),
 ]
