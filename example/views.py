@@ -1785,7 +1785,11 @@ def directivo_finanzas_comparativa_semanas(request):
         horas_acumuladas += semana_data['horas_total']
         semana_data['costo_acumulado'] = round(costo_acumulado, 2)
         semana_data['horas_acumuladas'] = round(horas_acumuladas, 2)
-        semana_data['porcentaje_completado'] = round((costo_acumulado / semanas_data[-1]['costo_acumulado']) * 100, 2)
+    
+    # Calcular porcentajes después de tener todos los totales acumulados
+    costo_total_final = semanas_data[-1]['costo_acumulado'] if semanas_data else 0
+    for semana_data in semanas_data:
+        semana_data['porcentaje_completado'] = round((semana_data['costo_acumulado'] / max(1, costo_total_final)) * 100, 2)
 
     # Respuesta
     response_data = {
