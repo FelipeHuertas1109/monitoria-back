@@ -20,8 +20,10 @@ urlpatterns = [
     # Directivo
     path('directivo/horarios/', views.directivo_horarios_monitores, name='directivo_horarios_monitores'),
     path('directivo/asistencias/', views.directivo_asistencias, name='directivo_asistencias'),
+    path('directivo/asistencias/recuperables/', views.directivo_asistencias_recuperables, name='directivo_asistencias_recuperables'),
     path('directivo/asistencias/<int:pk>/autorizar/', views.directivo_autorizar_asistencia, name='directivo_autorizar_asistencia'),
     path('directivo/asistencias/<int:pk>/rechazar/', views.directivo_rechazar_asistencia, name='directivo_rechazar_asistencia'),
+    path('directivo/asistencias/<int:pk>/recuperar/', views.directivo_recuperar_asistencia, name='directivo_recuperar_asistencia'),
     
     # Reportes
     path('directivo/reportes/horas-monitor/<int:monitor_id>/', views.directivo_reporte_horas_monitor, name='directivo_reporte_horas_monitor'),

@@ -98,6 +98,7 @@ class Asistencia(models.Model):
         ("pendiente", "Pendiente"),
         ("autorizado", "Autorizado"),
         ("rechazado", "Rechazado"),
+        ("recuperado", "Recuperado"),
     ]
     usuario = models.ForeignKey(UsuarioPersonalizado, on_delete=models.CASCADE, related_name="asistencias")
     fecha = models.DateField()  # Día específico

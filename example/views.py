@@ -16,10 +16,10 @@ from .models import UsuarioPersonalizado, HorarioFijo, Asistencia, AjusteHoras, 
 def calcular_horas_asistencia(asistencia):
     """
     Calcula y actualiza las horas de una asistencia basado en:
-    - presente=True AND estado_autorizacion='autorizado' = 4 horas
+    - presente=True AND (estado_autorizacion='autorizado' OR estado_autorizacion='recuperado') = 4 horas
     - Cualquier otro caso = 0 horas
     """
-    if asistencia.presente and asistencia.estado_autorizacion == 'autorizado':
+    if asistencia.presente and asistencia.estado_autorizacion in ['autorizado', 'recuperado']:
         asistencia.horas = 4.00
     else:
         asistencia.horas = 0.00
@@ -625,7 +625,7 @@ def directivo_asistencias(request):
 
     # Parámetros
     fecha_str = request.query_params.get('fecha')
-    estado = request.query_params.get('estado')  # pendiente|autorizado|rechazado
+    estado = request.query_params.get('estado')  # pendiente|autorizado|rechazado|recuperado
     jornada = request.query_params.get('jornada')  # M|T
     sede = request.query_params.get('sede')  # SA|BA
 
@@ -658,6 +658,107 @@ def directivo_asistencias(request):
 
     serializer = AsistenciaSerializer(asistencias_qs.select_related('usuario', 'horario'), many=True)
     return Response(serializer.data)
+
+@api_view(['GET'])
+@authentication_classes([])
+@permission_classes([AllowAny])
+def directivo_asistencias_recuperables(request):
+    """
+    Listar asistencias que están pendientes y pueden ser recuperadas (fechas pasadas).
+    Acceso: solo DIRECTIVO
+    """
+    # Autenticación manual
+    auth_header = request.headers.get('Authorization')
+    if not auth_header or not auth_header.startswith('Bearer '):
+        return Response({'detail': 'Token de autenticación requerido'}, status=status.HTTP_401_UNAUTHORIZED)
+
+    # Usuario DIRECTIVO temporal
+    usuario_directivo = UsuarioPersonalizado.objects.filter(tipo_usuario='DIRECTIVO').first()
+    if not usuario_directivo:
+        return Response({'detail': 'No hay usuarios DIRECTIVO'}, status=status.HTTP_403_FORBIDDEN)
+
+    # Parámetros de filtrado
+    fecha_inicio_str = request.query_params.get('fecha_inicio')
+    fecha_fin_str = request.query_params.get('fecha_fin')
+    monitor_id = request.query_params.get('monitor_id')
+    jornada = request.query_params.get('jornada')  # M|T
+    sede = request.query_params.get('sede')  # SA|BA
+
+    # Fechas por defecto: últimos 30 días
+    from datetime import date, timedelta
+    if not fecha_inicio_str:
+        fecha_inicio = date.today() - timedelta(days=30)
+    else:
+        fecha_inicio = _parse_fecha(fecha_inicio_str)
+    
+    if not fecha_fin_str:
+        fecha_fin = date.today() - timedelta(days=1)  # Solo fechas pasadas
+    else:
+        fecha_fin = _parse_fecha(fecha_fin_str)
+
+    # Validar filtros
+    if jornada and jornada not in ['M', 'T']:
+        return Response({'detail': 'jornada debe ser M o T'}, status=status.HTTP_400_BAD_REQUEST)
+    if sede and sede not in ['SA', 'BA']:
+        return Response({'detail': 'sede debe ser SA o BA'}, status=status.HTTP_400_BAD_REQUEST)
+
+    # Query: asistencias pendientes en fechas pasadas
+    asistencias_qs = Asistencia.objects.filter(
+        estado_autorizacion='pendiente',
+        fecha__gte=fecha_inicio,
+        fecha__lt=date.today()  # Solo fechas pasadas
+    ).select_related('usuario', 'horario')
+
+    # Aplicar filtros adicionales
+    if monitor_id:
+        try:
+            monitor_id = int(monitor_id)
+            asistencias_qs = asistencias_qs.filter(usuario__id=monitor_id)
+        except ValueError:
+            return Response({'detail': 'monitor_id debe ser un número entero'}, status=status.HTTP_400_BAD_REQUEST)
+    
+    if jornada:
+        asistencias_qs = asistencias_qs.filter(horario__jornada=jornada)
+    if sede:
+        asistencias_qs = asistencias_qs.filter(horario__sede=sede)
+
+    # Ordenar por fecha descendente (más recientes primero)
+    asistencias_qs = asistencias_qs.order_by('-fecha', 'usuario__nombre', 'horario__jornada')
+
+    serializer = AsistenciaSerializer(asistencias_qs, many=True)
+    
+    # Estadísticas
+    total_recuperables = asistencias_qs.count()
+    monitores_afectados = asistencias_qs.values('usuario').distinct().count()
+    
+    # Agrupar por fecha para mejor visualización
+    asistencias_por_fecha = {}
+    for asistencia in asistencias_qs:
+        fecha_str = asistencia.fecha.strftime('%Y-%m-%d')
+        if fecha_str not in asistencias_por_fecha:
+            asistencias_por_fecha[fecha_str] = []
+        asistencias_por_fecha[fecha_str].append(AsistenciaSerializer(asistencia).data)
+
+    response_data = {
+        'periodo': {
+            'fecha_inicio': str(fecha_inicio),
+            'fecha_fin': str(fecha_fin)
+        },
+        'estadisticas': {
+            'total_recuperables': total_recuperables,
+            'monitores_afectados': monitores_afectados,
+            'fechas_afectadas': len(asistencias_por_fecha)
+        },
+        'filtros_aplicados': {
+            'monitor_id': monitor_id,
+            'jornada': jornada,
+            'sede': sede
+        },
+        'asistencias_por_fecha': asistencias_por_fecha,
+        'asistencias': serializer.data
+    }
+
+    return Response(response_data)
 
 @api_view(['POST'])
 @authentication_classes([])
@@ -702,6 +803,55 @@ def directivo_rechazar_asistencia(request, pk):
     calcular_horas_asistencia(asistencia)
     asistencia.save()
     return Response(AsistenciaSerializer(asistencia).data)
+
+@api_view(['POST'])
+@authentication_classes([])
+@permission_classes([AllowAny])
+def directivo_recuperar_asistencia(request, pk):
+    """
+    Recuperar una asistencia que estaba pendiente y ya pasó la fecha.
+    Solo funciona si:
+    1. La asistencia está en estado 'pendiente'
+    2. La fecha de la asistencia ya pasó
+    3. La solicitud viene de un DIRECTIVO
+    """
+    # Auth manual y rol DIRECTIVO
+    auth_header = request.headers.get('Authorization')
+    if not auth_header or not auth_header.startswith('Bearer '):
+        return Response({'detail': 'Token de autenticación requerido'}, status=status.HTTP_401_UNAUTHORIZED)
+    usuario_directivo = UsuarioPersonalizado.objects.filter(tipo_usuario='DIRECTIVO').first()
+    if not usuario_directivo:
+        return Response({'detail': 'No hay usuarios DIRECTIVO'}, status=status.HTTP_403_FORBIDDEN)
+
+    try:
+        asistencia = Asistencia.objects.get(pk=pk)
+    except Asistencia.DoesNotExist:
+        return Response({'detail': 'Asistencia no encontrada'}, status=status.HTTP_404_NOT_FOUND)
+
+    # Validar que la asistencia esté en estado pendiente
+    if asistencia.estado_autorizacion != 'pendiente':
+        return Response(
+            {'detail': f'La asistencia debe estar en estado "pendiente" para poder recuperarla. Estado actual: {asistencia.estado_autorizacion}'}, 
+            status=status.HTTP_400_BAD_REQUEST
+        )
+
+    # Validar que la fecha ya haya pasado
+    from datetime import date
+    if asistencia.fecha >= date.today():
+        return Response(
+            {'detail': 'Solo se pueden recuperar asistencias de fechas pasadas'}, 
+            status=status.HTTP_400_BAD_REQUEST
+        )
+
+    # Cambiar estado a recuperado
+    asistencia.estado_autorizacion = 'recuperado'
+    calcular_horas_asistencia(asistencia)
+    asistencia.save()
+    
+    return Response({
+        'mensaje': 'Asistencia recuperada exitosamente',
+        'asistencia': AsistenciaSerializer(asistencia).data
+    })
 
 # ===== Endpoints para REPORTES =====
 
@@ -1043,8 +1193,8 @@ def monitor_marcar(request):
         defaults={'presente': False, 'estado_autorizacion': 'pendiente', 'horas': 0.00}
     )
 
-    # Solo permite marcar si el bloque fue autorizado por un DIRECTIVO
-    if asistencia.estado_autorizacion != 'autorizado':
+    # Solo permite marcar si el bloque fue autorizado o recuperado por un DIRECTIVO
+    if asistencia.estado_autorizacion not in ['autorizado', 'recuperado']:
         return Response(
             {
                 'detail': 'Esta jornada aún no ha sido autorizada por un directivo.',
